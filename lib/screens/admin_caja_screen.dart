@@ -83,12 +83,16 @@ class _AdminCajaScreenState extends State<AdminCajaScreen> {
           children: [
             Text(
               'Base del día — $cobradorNombre',
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              style: const TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
             ),
             const SizedBox(height: 16),
             TextField(
               controller: ctrl,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
               decoration: const InputDecoration(
                 labelText: 'Monto a entregar',
                 prefixText: '\$',
@@ -112,7 +116,8 @@ class _AdminCajaScreenState extends State<AdminCajaScreen> {
                 if (ctx.mounted) Navigator.pop(ctx);
 
                 if (!mounted) return;
-                if (res != null && (res.statusCode == 200 || res.statusCode == 201)) {
+                if (res != null &&
+                    (res.statusCode == 200 || res.statusCode == 201)) {
                   cargarResumen();
                 }
               },
@@ -122,7 +127,10 @@ class _AdminCajaScreenState extends State<AdminCajaScreen> {
               ),
               child: const Text(
                 'Confirmar',
-                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
           ],
@@ -155,7 +163,10 @@ class _AdminCajaScreenState extends State<AdminCajaScreen> {
           children: [
             Text(
               'Cierre — ${caja['cobradornombre'] ?? ''}',
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              style: const TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
             ),
             const SizedBox(height: 8),
             Text(
@@ -165,9 +176,10 @@ class _AdminCajaScreenState extends State<AdminCajaScreen> {
             const SizedBox(height: 16),
             TextField(
               controller: ctrl,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
               decoration: const InputDecoration(
-                labelText: 'Monto que entregó físicamente',
+                labelText: 'Monto entregado físicamente',
                 prefixText: '\$',
               ),
             ),
@@ -177,16 +189,33 @@ class _AdminCajaScreenState extends State<AdminCajaScreen> {
                 final monto = double.tryParse(ctrl.text.trim());
                 if (monto == null || monto < 0) return;
 
-                final res = await ApiClient.put(
-                  '${Constants.apiUrl}/api/caja/${caja['id']}/cerrar',
-                  {'total_entregado': monto},
+                final res = await ApiClient.post(
+                  '${Constants.apiUrl}/api/caja/cerrar',
+                  {
+                    'caja_id': caja['id'],
+                    'total_entregado': monto,
+                  },
                 );
 
                 if (ctx.mounted) Navigator.pop(ctx);
 
                 if (!mounted) return;
+
                 if (res != null && res.statusCode == 200) {
                   cargarResumen();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Caja cerrada correctamente'),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('No se pudo cerrar la caja'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
                 }
               },
               style: ElevatedButton.styleFrom(
@@ -195,7 +224,10 @@ class _AdminCajaScreenState extends State<AdminCajaScreen> {
               ),
               child: const Text(
                 'Cerrar caja',
-                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
           ],
@@ -204,256 +236,276 @@ class _AdminCajaScreenState extends State<AdminCajaScreen> {
     );
   }
 
-  void mostrarDetalleCaja(Map<String, dynamic> caja) {
-    final pagos = (caja['pagosdeldia'] as List?) ?? [];
-    showModalBottomSheet(
+  Future<void> seleccionarFecha() async {
+    final fecha = await showDatePicker(
       context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(25)),
-      ),
-      builder: (_) => Padding(
-        padding: const EdgeInsets.all(16),
-        child: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                'Detalle — ${caja['cobradornombre'] ?? ''}',
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 16),
-              _fila('Fecha', caja['fecha']?.toString() ?? fechaStr),
-              _fila('Base entregada', '\$${fmt.format((caja['baseentregada'] ?? 0) as num)}'),
-              _fila('Total cobrado', '\$${fmt.format((caja['totalcobrado'] ?? 0) as num)}'),
-              _fila('Total entregado', '\$${fmt.format((caja['totalentregado'] ?? 0) as num)}'),
-              _fila(
-                'Diferencia',
-                '\$${fmt.format((caja['diferencia'] ?? 0) as num)}',
-                color: ((caja['diferencia'] ?? 0) as num) >= 0 ? Colors.green : Colors.red,
-              ),
-              const SizedBox(height: 20),
-              const Text(
-                'Pagos del día',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 12),
-              if (pagos.isEmpty)
-                const Text(
-                  'No hay pagos registrados para este cobrador en este día.',
-                  style: TextStyle(color: Colors.grey),
-                )
-              else
-                ...pagos.map((p) {
-                  return Card(
-                    child: ListTile(
-                      leading: const Icon(Icons.payments, color: Colors.green),
-                      title: Text(
-                        '\$${fmt.format((p['monto_pagado'] ?? 0) as num)}',
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      subtitle: Text(
-                        'Préstamo #${p['prestamo_id'] ?? ''} • ${p['fecha_pago'] ?? ''}',
-                      ),
-                    ),
-                  );
-                }),
-            ],
-          ),
-        ),
-      ),
+      initialDate: fechaSeleccionada,
+      firstDate: DateTime(2024),
+      lastDate: DateTime(2100),
     );
+
+    if (fecha != null) {
+      setState(() => fechaSeleccionada = fecha);
+      cargarResumen();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final totalBase =
+        (resumen?['total_base_entregada'] as num?)?.toDouble() ?? 0;
+    final totalCobrado =
+        (resumen?['total_cobrado'] as num?)?.toDouble() ?? 0;
+    final totalEntregado =
+        (resumen?['total_entregado'] as num?)?.toDouble() ?? 0;
+    final pendienteGeneral = totalBase + totalCobrado - totalEntregado;
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Caja del Día', style: TextStyle(fontWeight: FontWeight.bold)),
-        centerTitle: true,
-        backgroundColor: const Color(0xFFB3E5FC),
+        title: const Text(
+          'Administración de Caja',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        backgroundColor: const Color(0xFFE3F2FD),
         actions: [
           IconButton(
-            icon: const Icon(Icons.calendar_today),
-            onPressed: () async {
-              final picked = await showDatePicker(
-                context: context,
-                initialDate: fechaSeleccionada,
-                firstDate: DateTime(2024),
-                lastDate: DateTime.now(),
-              );
-              if (picked != null) {
-                setState(() => fechaSeleccionada = picked);
-                cargarResumen();
-              }
-            },
+            onPressed: seleccionarFecha,
+            icon: const Icon(Icons.calendar_month),
           ),
         ],
       ),
-      backgroundColor: const Color(0xFFE1F5FE),
       body: isLoading
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
               onRefresh: cargarResumen,
-              child: SingleChildScrollView(
-                physics: const AlwaysScrollableScrollPhysics(),
+              child: ListView(
                 padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    if (resumen != null) ...[
-                      const Text('Resumen General', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                      const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          _kpi('Base entregada', resumen!['totalbaseentregada'], Colors.orange.shade50, Colors.orange),
-                          const SizedBox(width: 10),
-                          _kpi('Total cobrado', resumen!['totalcobrado'], Colors.green.shade50, Colors.green),
-                        ],
+                children: [
+                  Text(
+                    'Fecha: ${DateFormat('dd/MM/yyyy').format(fechaSeleccionada)}',
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      _statCard(
+                        'Base entregada',
+                        '\$${fmt.format(totalBase)}',
+                        Colors.blue.shade50,
+                        Icons.account_balance_wallet,
+                        Colors.blue,
                       ),
-                      const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          _kpi('Total entregado', resumen!['totalentregado'], Colors.blue.shade50, Colors.blue),
-                          const SizedBox(width: 10),
-                          _kpi(
-                            'Saldo en caja',
-                            resumen!['saldocaja'],
-                            ((resumen!['saldocaja'] ?? 0) as num) >= 0 ? Colors.teal.shade50 : Colors.red.shade50,
-                            ((resumen!['saldocaja'] ?? 0) as num) >= 0 ? Colors.teal : Colors.red,
-                          ),
-                        ],
+                      const SizedBox(width: 12),
+                      _statCard(
+                        'Cobrado sistema',
+                        '\$${fmt.format(totalCobrado)}',
+                        Colors.green.shade50,
+                        Icons.payments,
+                        Colors.green,
                       ),
-                      const SizedBox(height: 24),
                     ],
-                    const Text('Cobradores', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                    const SizedBox(height: 12),
-                    ...cajas.map((c) {
-                      final base = ((c['baseentregada'] ?? 0) as num).toDouble();
-                      final cobrado = ((c['totalcobrado'] ?? 0) as num).toDouble();
-                      final entregado = c['totalentregado'];
-                      final cerrado = entregado != null;
-                      final diff = (c['diferencia'] ?? 0) as num;
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      _statCard(
+                        'Entregado físico',
+                        '\$${fmt.format(totalEntregado)}',
+                        Colors.purple.shade50,
+                        Icons.inventory_2,
+                        Colors.purple,
+                      ),
+                      const SizedBox(width: 12),
+                      _statCard(
+                        'Pendiente general',
+                        '\$${fmt.format(pendienteGeneral)}',
+                        pendienteGeneral >= 0
+                            ? Colors.amber.shade50
+                            : Colors.red.shade50,
+                        Icons.pending_actions,
+                        pendienteGeneral >= 0 ? Colors.amber : Colors.red,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  const Text(
+                    'Cajas por cobrador',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
+                  ),
+                  const SizedBox(height: 12),
+                  ...cajas.map((caja) {
+                    final base =
+                        ((caja['baseentregada'] ?? 0) as num).toDouble();
+                    final cobrado =
+                        ((caja['totalcobrado'] ?? 0) as num).toDouble();
+                    final entregado =
+                        ((caja['totalentregado'] ?? 0) as num?)?.toDouble();
+                    final cerrada = entregado != null && entregado > 0;
+                    final pendiente = base + cobrado - (entregado ?? 0);
 
-                      return Card(
-                        margin: const EdgeInsets.only(bottom: 12),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-                        child: InkWell(
-                          borderRadius: BorderRadius.circular(15),
-                          onTap: () => mostrarDetalleCaja(c),
-                          child: Padding(
-                            padding: const EdgeInsets.all(14),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                    return Card(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      margin: const EdgeInsets.only(bottom: 12),
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          children: [
+                            Row(
                               children: [
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Text(
-                                      c['cobradornombre'] ?? '',
-                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-                                    ),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-                                      decoration: BoxDecoration(
-                                        color: cerrado ? Colors.grey.shade100 : Colors.green.shade50,
-                                        borderRadius: BorderRadius.circular(10),
-                                      ),
-                                      child: Text(
-                                        cerrado ? 'Cerrado' : 'Abierto',
-                                        style: TextStyle(
-                                          color: cerrado ? Colors.grey : Colors.green,
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 10),
-                                _fila('Base entregada', '\$${fmt.format(base)}'),
-                                _fila('Cobrado en sistema', '\$${fmt.format(cobrado)}'),
-                                if (cerrado) ...[
-                                  _fila('Entregó físicamente', '\$${fmt.format((entregado as num).toDouble())}'),
-                                  _fila(
-                                    'Diferencia',
-                                    '\$${fmt.format(diff.toDouble())}',
-                                    color: diff >= 0 ? Colors.green : Colors.red,
+                                CircleAvatar(
+                                  backgroundColor: Colors.blue.shade50,
+                                  child: const Icon(
+                                    Icons.person,
+                                    color: Colors.blue,
                                   ),
-                                ],
-                                const SizedBox(height: 10),
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: OutlinedButton.icon(
-                                        onPressed: () => abrirModalBase(
-                                          c,
-                                          c['usuariosid'].toString(),
-                                          c['cobradornombre'] ?? '',
-                                        ),
-                                        icon: const Icon(Icons.account_balance_wallet, size: 16),
-                                        label: Text(base > 0 ? 'Editar base' : 'Dar base'),
-                                      ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Text(
+                                    caja['cobradornombre'] ?? 'Sin nombre',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 16,
                                     ),
-                                    if (!cerrado && base > 0) ...[
-                                      const SizedBox(width: 10),
-                                      Expanded(
-                                        child: ElevatedButton.icon(
-                                          onPressed: () => cerrarCaja(c),
-                                          icon: const Icon(Icons.lock, size: 16),
-                                          label: const Text('Cerrar'),
-                                          style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-                                        ),
-                                      ),
-                                    ],
-                                  ],
+                                  ),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 5,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: cerrada
+                                        ? Colors.grey.shade200
+                                        : Colors.green.shade50,
+                                    borderRadius: BorderRadius.circular(30),
+                                  ),
+                                  child: Text(
+                                    cerrada ? 'Cerrada' : 'Activa',
+                                    style: TextStyle(
+                                      color: cerrada
+                                          ? Colors.grey.shade700
+                                          : Colors.green.shade700,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 12,
+                                    ),
+                                  ),
                                 ),
                               ],
                             ),
-                          ),
+                            const SizedBox(height: 14),
+                            _filaMonto('Base entregada', base),
+                            _filaMonto('Cobrado en sistema', cobrado),
+                            _filaMonto(
+                              'Entregado físicamente',
+                              entregado ?? 0,
+                            ),
+                            _filaMonto('Pendiente por entregar', pendiente),
+                            const SizedBox(height: 14),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: OutlinedButton.icon(
+                                    onPressed: () => abrirModalBase(
+                                      caja,
+                                      caja['cobradorid'].toString(),
+                                      caja['cobradornombre'] ?? '',
+                                    ),
+                                    icon: const Icon(Icons.edit),
+                                    label: const Text('Editar base'),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: ElevatedButton.icon(
+                                    onPressed: cerrada
+                                        ? null
+                                        : () => cerrarCaja(caja),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.green,
+                                    ),
+                                    icon: const Icon(
+                                      Icons.lock,
+                                      color: Colors.white,
+                                    ),
+                                    label: const Text(
+                                      'Cerrar caja',
+                                      style: TextStyle(color: Colors.white),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
                         ),
-                      );
-                    }),
-                  ],
-                ),
+                      ),
+                    );
+                  }),
+                ],
               ),
             ),
     );
   }
 
-  Widget _kpi(String titulo, dynamic valor, Color bg, Color color) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(12)),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(titulo, style: TextStyle(fontSize: 11, color: color, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 4),
-            Text(
-              '\$${fmt.format((valor as num?)?.toDouble() ?? 0)}',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: color),
-            ),
-          ],
-        ),
+  Widget _filaMonto(String label, double monto) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label),
+          Text(
+            '\$${fmt.format(monto)}',
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _fila(String label, String valor, {Color? color}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(label, style: const TextStyle(color: Colors.grey, fontSize: 13)),
-          Text(
-            valor,
-            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: color),
-          ),
-        ],
+  Widget _statCard(
+    String titulo,
+    String valor,
+    Color bg,
+    IconData icon,
+    Color color,
+  ) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(15),
+        ),
+        child: Column(
+          children: [
+            Icon(icon, color: color, size: 26),
+            const SizedBox(height: 6),
+            Text(
+              titulo,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              valor,
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: color,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
       ),
     );
   }
