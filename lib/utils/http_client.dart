@@ -123,4 +123,19 @@ class ApiClient {
       return null;
     }
   }
+
+  static Future<http.Response?> deleteWithBody(String url, Map<String, dynamic> body) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('token') ?? '';
+      final request = http.Request('DELETE', Uri.parse(url));
+      request.headers['Content-Type'] = 'application/json';
+      request.headers['Authorization'] = 'Bearer $token';
+      request.body = jsonEncode(body);
+      final streamedResponse = await request.send();
+      return await http.Response.fromStream(streamedResponse);
+    } catch (e) {
+      return null;
+    }
+  }
 }

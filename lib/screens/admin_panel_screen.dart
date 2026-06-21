@@ -8,6 +8,7 @@ import '../services/admin_service.dart';
 import '../services/cobrador_service.dart';
 import 'cobradores_screen.dart';
 import 'rutas_screen.dart';
+import 'admin_caja_screen.dart';
 
 class AdminPanelScreen extends StatefulWidget {
   const AdminPanelScreen({super.key});
@@ -292,6 +293,36 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
                       minimumSize: const Size(double.infinity, 50),
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12)),
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: ElevatedButton.icon(
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const AdminCajaScreen(),
+                      ),
+                    ),
+                    icon: const Icon(
+                      Icons.account_balance,
+                      color: Colors.white,
+                    ),
+                    label: const Text(
+                      'Caja del Día',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.teal,
+                      minimumSize: const Size(double.infinity, 50),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
                     ),
                   ),
                 ),
