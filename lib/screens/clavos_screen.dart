@@ -1,7 +1,5 @@
-// lib/screens/clavos_screen.dart
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import '../utils/constants.dart';
 import '../utils/http_client.dart';
 
@@ -14,16 +12,14 @@ class ClavosScreen extends StatefulWidget {
 
 class _ClavosScreenState extends State<ClavosScreen>
     with AutomaticKeepAliveClientMixin {
-  List<dynamic> _clavos      = [];
-  int  _totalActivos          = 0;
-  bool _isLoading             = false;
-  bool _dataCargada           = false;
+  List<Map<String, dynamic>> _clavos = [];
+  int _totalActivos = 0;
+  bool _isLoading = false;
+  bool _dataCargada = false;
 
   @override
   bool get wantKeepAlive => true;
 
-  // ✅ didChangeDependencies en lugar de initState
-  // Se ejecuta cuando el widget ya está montado en el árbol completo
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -38,21 +34,10 @@ class _ClavosScreenState extends State<ClavosScreen>
     setState(() => _isLoading = true);
 
     try {
-      // ✅ Token siempre fresco desde Supabase, nunca desde SharedPreferences
-      final session = Supabase.instance.client.auth.currentSession;
-
-      if (session == null) {
-        throw Exception('Sesión no encontrada. Por favor inicia sesión.');
-      }
-
-      print('🔑 Token disponible: ${session.accessToken.substring(0, 20)}...');
-
-      final clavosRes  = await ApiClient.get('${Constants.apiUrl}/api/loans/clavos');
-      final activosRes = await ApiClient.get('${Constants.apiUrl}/api/reports/resumen');
-
-      print('🔴 clavos status: ${clavosRes?.statusCode}');
-      print('🔴 clavos body: ${clavosRes?.body}');
-      print('📊 resumen status: ${activosRes?.statusCode}');
+      final clavosRes =
+          await ApiClient.get('${Constants.apiUrl}/api/loans/clavos');
+      final activosRes =
+          await ApiClient.get('${Constants.apiUrl}/api/reports/resumen');
 
       if (!mounted) return;
 
@@ -62,25 +47,33 @@ class _ClavosScreenState extends State<ClavosScreen>
         int totalActivos = 0;
         if (activosRes != null && activosRes.statusCode == 200) {
           final resumen = jsonDecode(activosRes.body);
-          totalActivos  = resumen['cantidad_prestamos_activos'] ?? 0;
+          totalActivos =
+              (resumen['cantidad_prestamos_activos'] as num?)?.toInt() ?? 0;
         }
 
+        final clavosList = clavosData is List
+            ? clavosData
+                .whereType<Map>()
+                .map((e) => Map<String, dynamic>.from(e))
+                .toList()
+            : <Map<String, dynamic>>[];
+
         setState(() {
-          _clavos       = clavosData is List ? clavosData : [];
+          _clavos = clavosList;
           _totalActivos = totalActivos;
-          _isLoading    = false;
+          _isLoading = false;
         });
       } else {
         final errorBody = clavosRes?.body ?? 'Sin respuesta';
         throw Exception('Error ${clavosRes?.statusCode}: $errorBody');
       }
     } catch (e) {
-      print('❌ Error clavos: $e');
       if (!mounted) return;
       setState(() {
-        _isLoading   = false;
-        _dataCargada = false; // permite reintentar
+        _isLoading = false;
+        _dataCargada = false;
       });
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Error cargando clavos: $e'),
@@ -101,16 +94,15 @@ class _ClavosScreenState extends State<ClavosScreen>
   Future<void> _recargar() async {
     setState(() {
       _dataCargada = false;
-      _clavos      = [];
+      _clavos = [];
     });
     await _cargarDatos();
   }
 
   @override
   Widget build(BuildContext context) {
-    super.build(context); // ✅ requerido por AutomaticKeepAliveClientMixin
+    super.build(context);
 
-    // ✅ Sin Scaffold — MainLayout ya lo provee
     if (_isLoading) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -122,51 +114,65 @@ class _ClavosScreenState extends State<ClavosScreen>
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            // ── Tarjetas de resumen ──────────────────────────
-            Row(children: [
-              Expanded(
-                child: Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF81D4FA),
-                    borderRadius: BorderRadius.circular(15),
-                  ),
-                  child: Column(children: [
-                    const Text('Préstamos Activos',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                        textAlign: TextAlign.center),
-                    const SizedBox(height: 4),
-                    Text('$_totalActivos',
-                        style: const TextStyle(
-                            fontSize: 28, fontWeight: FontWeight.bold)),
-                  ]),
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFFCDD2),
-                    borderRadius: BorderRadius.circular(15),
-                  ),
-                  child: Column(children: [
-                    const Text('Clavos',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                        textAlign: TextAlign.center),
-                    const SizedBox(height: 4),
-                    Text('${_clavos.length}',
-                        style: const TextStyle(
+            Row(
+              children: [
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF81D4FA),
+                      borderRadius: BorderRadius.circular(15),
+                    ),
+                    child: Column(
+                      children: [
+                        const Text(
+                          'Préstamos Activos',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '$_totalActivos',
+                          style: const TextStyle(
                             fontSize: 28,
                             fontWeight: FontWeight.bold,
-                            color: Colors.red)),
-                  ]),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
-              ),
-            ]),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFCDD2),
+                      borderRadius: BorderRadius.circular(15),
+                    ),
+                    child: Column(
+                      children: [
+                        const Text(
+                          'Clavos',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '${_clavos.length}',
+                          style: const TextStyle(
+                            fontSize: 28,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.red,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
             const SizedBox(height: 16),
-
-            // ── Alerta si hay morosos ────────────────────────
             if (_clavos.isNotEmpty) ...[
               Container(
                 padding: const EdgeInsets.all(12),
@@ -175,36 +181,45 @@ class _ClavosScreenState extends State<ClavosScreen>
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(color: Colors.red.shade200),
                 ),
-                child: Row(children: [
-                  const Icon(Icons.warning_amber_rounded, color: Colors.red),
-                  const SizedBox(width: 8),
-                  Text('⚠️ ${_clavos.length} clientes en mora',
+                child: Row(
+                  children: [
+                    const Icon(Icons.warning_amber_rounded, color: Colors.red),
+                    const SizedBox(width: 8),
+                    Text(
+                      '⚠️ ${_clavos.length} clientes en mora',
                       style: const TextStyle(
-                          color: Colors.red, fontWeight: FontWeight.bold)),
-                ]),
+                        color: Colors.red,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
               ),
               const SizedBox(height: 16),
             ],
-
-            // ── Título lista ─────────────────────────────────
-            const Text('Clientes Morosos',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const Text(
+              'Clientes Morosos',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 12),
-
-            // ── Lista de clavos ──────────────────────────────
             _clavos.isEmpty
                 ? const Padding(
                     padding: EdgeInsets.only(top: 40),
                     child: Center(
-                      child: Column(children: [
-                        Icon(Icons.check_circle, color: Colors.green, size: 60),
-                        SizedBox(height: 12),
-                        Text('¡Sin clientes morosos! 🎉',
+                      child: Column(
+                        children: [
+                          Icon(Icons.check_circle, color: Colors.green, size: 60),
+                          SizedBox(height: 12),
+                          Text(
+                            '¡Sin clientes morosos! 🎉',
                             style: TextStyle(
-                                color: Colors.green,
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600)),
-                      ]),
+                              color: Colors.green,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   )
                 : ListView.builder(
@@ -212,14 +227,15 @@ class _ClavosScreenState extends State<ClavosScreen>
                     physics: const NeverScrollableScrollPhysics(),
                     itemCount: _clavos.length,
                     itemBuilder: (context, index) {
-                      final clavo    = _clavos[index];
-                      final nombre   = clavo['nombre_cliente'] ?? 'Sin nombre';
-                      final dias     = clavo['dias_sin_pago']  ?? 0;
-                      final saldo    = (clavo['saldo_pendiente'] as num?)
-                              ?.toDouble() ?? 0;
-                      final cobrador = clavo['cobrador']       ?? '';
+                      final clavo = _clavos[index];
+                      final nombre =
+                          (clavo['nombre_cliente'] ?? 'Sin nombre').toString();
+                      final dias =
+                          (clavo['dias_sin_pago'] as num?)?.toInt() ?? 0;
+                      final saldo =
+                          (clavo['saldo_pendiente'] as num?)?.toDouble() ?? 0;
+                      final cobrador = (clavo['cobrador'] ?? '').toString();
 
-                      // Color según días en mora
                       final Color colorDias = dias >= 10
                           ? Colors.red
                           : dias >= 5
@@ -229,37 +245,47 @@ class _ClavosScreenState extends State<ClavosScreen>
                       return Card(
                         margin: const EdgeInsets.only(bottom: 12),
                         shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(15)),
+                          borderRadius: BorderRadius.circular(15),
+                        ),
                         child: Padding(
                           padding: const EdgeInsets.all(12),
                           child: Row(
                             children: [
                               CircleAvatar(
                                 backgroundColor: Colors.red[100],
-                                child: const Icon(Icons.person,
-                                    color: Colors.red),
+                                child: const Icon(
+                                  Icons.person,
+                                  color: Colors.red,
+                                ),
                               ),
                               const SizedBox(width: 12),
                               Expanded(
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(nombre,
-                                        style: const TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 15)),
+                                    Text(
+                                      nombre,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 15,
+                                      ),
+                                    ),
                                     if (cobrador.isNotEmpty)
-                                      Text('Cobrador: $cobrador',
-                                          style: TextStyle(
-                                              color: Colors.grey[600],
-                                              fontSize: 12)),
+                                      Text(
+                                        'Cobrador: $cobrador',
+                                        style: TextStyle(
+                                          color: Colors.grey[600],
+                                          fontSize: 12,
+                                        ),
+                                      ),
                                     if (saldo > 0)
                                       Text(
                                         'Saldo: \$${saldo.toStringAsFixed(0)}',
                                         style: const TextStyle(
-                                            color: Colors.red,
-                                            fontWeight: FontWeight.w600,
-                                            fontSize: 13),
+                                          color: Colors.red,
+                                          fontWeight: FontWeight.w600,
+                                          fontSize: 13,
+                                        ),
                                       ),
                                   ],
                                 ),
@@ -269,31 +295,41 @@ class _ClavosScreenState extends State<ClavosScreen>
                                 children: [
                                   Container(
                                     padding: const EdgeInsets.symmetric(
-                                        horizontal: 10, vertical: 4),
+                                      horizontal: 10,
+                                      vertical: 4,
+                                    ),
                                     decoration: BoxDecoration(
                                       color: colorDias.withOpacity(0.15),
                                       borderRadius: BorderRadius.circular(10),
                                       border: Border.all(color: colorDias),
                                     ),
-                                    child: Text('$dias días',
-                                        style: TextStyle(
-                                            color: colorDias,
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 12)),
+                                    child: Text(
+                                      '$dias días',
+                                      style: TextStyle(
+                                        color: colorDias,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 12,
+                                      ),
+                                    ),
                                   ),
                                   const SizedBox(height: 4),
                                   Container(
                                     padding: const EdgeInsets.symmetric(
-                                        horizontal: 8, vertical: 3),
+                                      horizontal: 8,
+                                      vertical: 3,
+                                    ),
                                     decoration: BoxDecoration(
                                       color: Colors.red[100],
                                       borderRadius: BorderRadius.circular(8),
                                     ),
-                                    child: const Text('CLAVO',
-                                        style: TextStyle(
-                                            color: Colors.red,
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 11)),
+                                    child: const Text(
+                                      'CLAVO',
+                                      style: TextStyle(
+                                        color: Colors.red,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 11,
+                                      ),
+                                    ),
                                   ),
                                 ],
                               ),

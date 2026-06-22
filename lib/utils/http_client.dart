@@ -16,43 +16,50 @@ class ApiClient {
   static Future<void> _cerrarSesion() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.clear();
+
     navigatorKey.currentState?.pushAndRemoveUntil(
       MaterialPageRoute(builder: (_) => const LoginScreen()),
       (route) => false,
     );
   }
 
-  static Map<String, String> _headers(String? token,
-      {bool json = true}) {
+  static Map<String, String> _headers(
+    String? token, {
+    bool json = true,
+  }) {
     return {
       if (json) 'Content-Type': 'application/json',
-      if (token != null) 'Authorization': 'Bearer $token',
+      if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
     };
   }
 
   static void _mostrarSnackBar(String mensaje) {
-    navigatorKey.currentState?.context != null
-        ? ScaffoldMessenger.of(navigatorKey.currentState!.context)
-            .showSnackBar(SnackBar(
-              content: Text(mensaje),
-              backgroundColor: Colors.red,
-            ))
-        : null;
+    final context = navigatorKey.currentState?.context;
+    if (context == null) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(mensaje),
+        backgroundColor: Colors.red,
+      ),
+    );
   }
 
-  // ── GET ──────────────────────────────────────
   static Future<http.Response?> get(String url) async {
     final token = await _getToken();
+
     try {
       final response = await http.get(
         Uri.parse(url),
         headers: _headers(token, json: false),
       );
+
       if (response.statusCode == 401) {
         _mostrarSnackBar('Sesión expirada. Inicia sesión nuevamente.');
         await _cerrarSesion();
         return null;
       }
+
       return response;
     } catch (e) {
       _mostrarSnackBar('❌ Sin conexión al servidor');
@@ -60,21 +67,25 @@ class ApiClient {
     }
   }
 
-  // ── POST ─────────────────────────────────────
-  static Future<http.Response?> post(String url,
-      Map<String, dynamic> body) async {
+  static Future<http.Response?> post(
+    String url,
+    Map<String, dynamic> body,
+  ) async {
     final token = await _getToken();
+
     try {
       final response = await http.post(
         Uri.parse(url),
         headers: _headers(token),
         body: jsonEncode(body),
       );
+
       if (response.statusCode == 401) {
         _mostrarSnackBar('Sesión expirada. Inicia sesión nuevamente.');
         await _cerrarSesion();
         return null;
       }
+
       return response;
     } catch (e) {
       _mostrarSnackBar('❌ Sin conexión al servidor');
@@ -82,21 +93,25 @@ class ApiClient {
     }
   }
 
-  // ── PUT ──────────────────────────────────────
-  static Future<http.Response?> put(String url,
-      Map<String, dynamic> body) async {
+  static Future<http.Response?> put(
+    String url,
+    Map<String, dynamic> body,
+  ) async {
     final token = await _getToken();
+
     try {
       final response = await http.put(
         Uri.parse(url),
         headers: _headers(token),
         body: jsonEncode(body),
       );
+
       if (response.statusCode == 401) {
         _mostrarSnackBar('Sesión expirada. Inicia sesión nuevamente.');
         await _cerrarSesion();
         return null;
       }
+
       return response;
     } catch (e) {
       _mostrarSnackBar('❌ Sin conexión al servidor');
@@ -104,19 +119,21 @@ class ApiClient {
     }
   }
 
-  // ── DELETE ───────────────────────────────────
   static Future<http.Response?> delete(String url) async {
     final token = await _getToken();
+
     try {
       final response = await http.delete(
         Uri.parse(url),
         headers: _headers(token, json: false),
       );
+
       if (response.statusCode == 401) {
         _mostrarSnackBar('Sesión expirada. Inicia sesión nuevamente.');
         await _cerrarSesion();
         return null;
       }
+
       return response;
     } catch (e) {
       _mostrarSnackBar('❌ Sin conexión al servidor');
@@ -124,17 +141,31 @@ class ApiClient {
     }
   }
 
-  static Future<http.Response?> deleteWithBody(String url, Map<String, dynamic> body) async {
+  static Future<http.Response?> deleteWithBody(
+    String url,
+    Map<String, dynamic> body,
+  ) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('token') ?? '';
+      final token = prefs.getString('jwt_token') ?? '';
+
       final request = http.Request('DELETE', Uri.parse(url));
       request.headers['Content-Type'] = 'application/json';
       request.headers['Authorization'] = 'Bearer $token';
       request.body = jsonEncode(body);
+
       final streamedResponse = await request.send();
-      return await http.Response.fromStream(streamedResponse);
+      final response = await http.Response.fromStream(streamedResponse);
+
+      if (response.statusCode == 401) {
+        _mostrarSnackBar('Sesión expirada. Inicia sesión nuevamente.');
+        await _cerrarSesion();
+        return null;
+      }
+
+      return response;
     } catch (e) {
+      _mostrarSnackBar('❌ Sin conexión al servidor');
       return null;
     }
   }

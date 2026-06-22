@@ -17,7 +17,7 @@ class PrestamosScreen extends StatefulWidget {
 }
 
 class _PrestamosScreenState extends State<PrestamosScreen> {
-  List<dynamic> _prestamos = [];
+  List _prestamos = [];
   bool _isLoading = true;
 
   @override
@@ -37,7 +37,9 @@ class _PrestamosScreenState extends State<PrestamosScreen> {
       setState(() => _prestamos = jsonDecode(response.body));
     }
 
-    if (mounted) setState(() => _isLoading = false);
+    if (mounted) {
+      setState(() => _isLoading = false);
+    }
   }
 
   @override
@@ -71,7 +73,7 @@ class _PrestamosScreenState extends State<PrestamosScreen> {
                   itemCount: _prestamos.length,
                   itemBuilder: (context, index) {
                     final p = _prestamos[index];
-                    final cliente = p['clientes'];
+                    final cliente = p['clientes'] ?? {};
                     final ruta = cliente['rutas'];
                     final cobrador = p['usuarios']?['nombre'] ?? 'Sin cobrador';
 
@@ -89,7 +91,7 @@ class _PrestamosScreenState extends State<PrestamosScreen> {
                           ),
                         ),
                         title: Text(
-                          cliente['nombre'],
+                          cliente['nombre'] ?? 'Sin cliente',
                           style: const TextStyle(fontWeight: FontWeight.bold),
                         ),
                         subtitle: Column(
@@ -101,11 +103,14 @@ class _PrestamosScreenState extends State<PrestamosScreen> {
                             if (ruta != null)
                               Row(
                                 children: [
-                                  const Icon(Icons.map,
-                                      size: 12, color: Colors.blue),
+                                  const Icon(
+                                    Icons.map,
+                                    size: 12,
+                                    color: Colors.blue,
+                                  ),
                                   const SizedBox(width: 4),
                                   Text(
-                                    ruta['nombre'],
+                                    ruta['nombre'] ?? '',
                                     style: const TextStyle(
                                       fontSize: 12,
                                       color: Colors.blue,
@@ -115,8 +120,11 @@ class _PrestamosScreenState extends State<PrestamosScreen> {
                               ),
                             Row(
                               children: [
-                                const Icon(Icons.person_outline,
-                                    size: 12, color: Colors.grey),
+                                const Icon(
+                                  Icons.person_outline,
+                                  size: 12,
+                                  color: Colors.grey,
+                                ),
                                 const SizedBox(width: 4),
                                 Text(
                                   cobrador,
@@ -151,7 +159,7 @@ class _PrestamosScreenState extends State<PrestamosScreen> {
 }
 
 class DetallePrestamoScreen extends StatefulWidget {
-  final Map<String, dynamic> prestamo;
+  final Map prestamo;
   const DetallePrestamoScreen({super.key, required this.prestamo});
 
   @override
@@ -159,7 +167,7 @@ class DetallePrestamoScreen extends StatefulWidget {
 }
 
 class _DetallePrestamoScreenState extends State<DetallePrestamoScreen> {
-  List<dynamic> _historial = [];
+  List _historial = [];
   bool _isLoading = true;
   bool _esAdmin = false;
   final TextEditingController _montoController = TextEditingController();
@@ -172,7 +180,8 @@ class _DetallePrestamoScreenState extends State<DetallePrestamoScreen> {
 
   Future<void> _cargarDatos() async {
     final prefs = await SharedPreferences.getInstance();
-    final rol = prefs.getString('userrol') ?? 'cobrador';
+    final rol =
+        prefs.getString('user_rol') ?? prefs.getString('userrol') ?? 'cobrador';
 
     if (mounted) {
       setState(() => _esAdmin = rol == 'admin');
@@ -230,7 +239,7 @@ class _DetallePrestamoScreenState extends State<DetallePrestamoScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      shape: RoundedRectangleBorder(
+      shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(25)),
       ),
       builder: (ctx) => StatefulBuilder(
@@ -252,8 +261,10 @@ class _DetallePrestamoScreenState extends State<DetallePrestamoScreen> {
                     SizedBox(width: 8),
                     Text(
                       'Editar Préstamo',
-                      style:
-                          TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ],
                 ),
@@ -321,8 +332,7 @@ class _DetallePrestamoScreenState extends State<DetallePrestamoScreen> {
                         ),
                         onChanged: (val) {
                           final dias = int.tryParse(val) ?? 0;
-                          nuevaFechaFin =
-                              fechaFinActual.add(Duration(days: dias));
+                          nuevaFechaFin = fechaFinActual.add(Duration(days: dias));
                           fechaCtrl.text =
                               DateFormat('dd/MM/yyyy').format(nuevaFechaFin);
                           setStateModal(() {});
@@ -340,7 +350,8 @@ class _DetallePrestamoScreenState extends State<DetallePrestamoScreen> {
                             lastDate: DateTime(2100),
                           );
                           if (picked != null) {
-                            final diff = picked.difference(fechaFinActual).inDays;
+                            final diff =
+                                picked.difference(fechaFinActual).inDays;
                             nuevaFechaFin = picked;
                             diasCtrl.text = diff > 0 ? diff.toString() : '0';
                             fechaCtrl.text =
@@ -363,6 +374,7 @@ class _DetallePrestamoScreenState extends State<DetallePrestamoScreen> {
                     ),
                   ],
                 ),
+                const SizedBox(height: 12),
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
@@ -371,8 +383,11 @@ class _DetallePrestamoScreenState extends State<DetallePrestamoScreen> {
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.info_outline,
-                          color: Colors.blue, size: 16),
+                      const Icon(
+                        Icons.info_outline,
+                        color: Colors.blue,
+                        size: 16,
+                      ),
                       const SizedBox(width: 8),
                       Text(
                         'Actual: ${DateFormat('dd MMM yyyy').format(fechaFinActual)}',
@@ -420,7 +435,7 @@ class _DetallePrestamoScreenState extends State<DetallePrestamoScreen> {
     final nuevoSaldo = double.tryParse(saldoCtrl.text) ?? 0;
     final p = widget.prestamo;
 
-    final confirmar = await showDialog<bool>(
+    final confirmar = await showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
@@ -450,7 +465,9 @@ class _DetallePrestamoScreenState extends State<DetallePrestamoScreen> {
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.deepPurple),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.deepPurple,
+            ),
             child: const Text(
               'Confirmar',
               style: TextStyle(color: Colors.white),
@@ -489,117 +506,83 @@ class _DetallePrestamoScreenState extends State<DetallePrestamoScreen> {
   }
 
   void _renovarDeuda() {
+    final diasCtrl = TextEditingController(text: '30');
     final saldoActual =
         double.parse(widget.prestamo['saldo_pendiente'].toString());
-    late TextEditingController montoRenovarCtrl;
-    late TextEditingController montoPagarCtrl;
-
-    montoRenovarCtrl =
-        TextEditingController(text: saldoActual.toStringAsFixed(0));
-    montoPagarCtrl =
-        TextEditingController(text: (saldoActual * 1.20).toStringAsFixed(0));
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      shape: RoundedRectangleBorder(
+      shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(25)),
       ),
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setStateModal) => Padding(
-          padding: EdgeInsets.only(
-            left: 16,
-            right: 16,
-            top: 24,
-            bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                children: const [
-                  Icon(Icons.refresh, color: Colors.orange),
-                  SizedBox(width: 8),
-                  Text(
-                    'Renovar Deuda',
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                  ),
-                ],
-              ),
-              const Text(
-                'El cliente elige los montos',
-                style: TextStyle(color: Colors.grey),
-              ),
-              const Divider(height: 24),
-              const Text(
-                'Monto a Renovar',
-                style: TextStyle(fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 6),
-              TextField(
-                controller: montoRenovarCtrl,
-                keyboardType: TextInputType.number,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                decoration: InputDecoration(
-                  prefixText: '\$ ',
-                  border: const OutlineInputBorder(),
-                  helperText: 'Hasta el saldo actual: \$${saldoActual.toStringAsFixed(0)}',
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.only(
+          left: 16,
+          right: 16,
+          top: 24,
+          bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: const [
+                Icon(Icons.refresh, color: Colors.orange),
+                SizedBox(width: 8),
+                Text(
+                  'Renovar Deuda',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                 ),
-                onChanged: (_) => setStateModal(() {}),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Saldo actual: \$${saldoActual.toStringAsFixed(0)}',
+              style: const TextStyle(color: Colors.grey),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'El backend actual renovará el préstamo usando el saldo pendiente y calculará el nuevo total automáticamente.',
+              style: TextStyle(color: Colors.grey),
+            ),
+            const Divider(height: 24),
+            TextField(
+              controller: diasCtrl,
+              keyboardType: TextInputType.number,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              decoration: const InputDecoration(
+                labelText: 'Días de plazo',
+                border: OutlineInputBorder(),
               ),
-              const SizedBox(height: 16),
-              const Text(
-                'Nuevo Monto a Pagar',
-                style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton.icon(
+              onPressed: () => _confirmarRenovacion(diasCtrl),
+              icon: const Icon(Icons.save),
+              label: const Text(
+                'Renovar',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
               ),
-              const SizedBox(height: 6),
-              TextField(
-                controller: montoPagarCtrl,
-                keyboardType: TextInputType.number,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                decoration: const InputDecoration(
-                  prefixText: '\$ ',
-                  border: OutlineInputBorder(),
-                  helperText: 'Mínimo 110% del monto renovado',
-                ),
-                onChanged: (_) => setStateModal(() {}),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.orange,
+                padding: const EdgeInsets.symmetric(vertical: 14),
               ),
-              const SizedBox(height: 20),
-              ElevatedButton.icon(
-                onPressed: () => _confirmarRenovacion(
-                  montoRenovarCtrl,
-                  montoPagarCtrl,
-                ),
-                icon: const Icon(Icons.save),
-                label: const Text(
-                  'Renovar',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.orange,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
   }
 
   Future<void> _confirmarRenovacion(
-    TextEditingController montoRenovarCtrl,
-    TextEditingController montoPagarCtrl,
+    TextEditingController diasCtrl,
   ) async {
-    final montoRenovar = double.tryParse(montoRenovarCtrl.text) ?? 0;
-    final montoPagar = double.tryParse(montoPagarCtrl.text) ?? 0;
-    final saldoActual = double.parse(widget.prestamo['saldo_pendiente'].toString());
+    final diasPlazo = int.tryParse(diasCtrl.text.trim()) ?? 0;
 
-    if (montoRenovar <= 0 ||
-        montoRenovar > saldoActual ||
-        montoPagar < montoRenovar * 1.10) {
-      _showSnack('❌ Montos inválidos', Colors.red);
+    if (diasPlazo <= 0) {
+      _showSnack('❌ Días inválidos', Colors.red);
       return;
     }
 
@@ -608,16 +591,21 @@ class _DetallePrestamoScreenState extends State<DetallePrestamoScreen> {
     final response = await ApiClient.post(
       '${Constants.apiUrl}/api/payments/renew',
       {
-        'prestamoid': widget.prestamo['id'],
-        'diasplazo': 30,
+        'prestamo_id': widget.prestamo['id'],
+        'dias_plazo': diasPlazo,
       },
     );
 
     if (response?.statusCode == 201 && mounted) {
       _showSnack('✅ Deuda renovada exitosamente', Colors.green);
-      Navigator.pop(context);
+      Navigator.pop(context, true);
     } else {
-      _showSnack('❌ Error al renovar', Colors.red);
+      String mensaje = '❌ Error al renovar';
+      try {
+        final data = jsonDecode(response?.body ?? '{}');
+        mensaje = data['error'] ?? mensaje;
+      } catch (_) {}
+      _showSnack(mensaje, Colors.red);
     }
   }
 
@@ -680,9 +668,6 @@ class _DetallePrestamoScreenState extends State<DetallePrestamoScreen> {
       'monto_pagado': monto,
     };
 
-    debugPrint('POST /api/payments/pay');
-    debugPrint('BODY: ${jsonEncode(body)}');
-
     final response = await ApiClient.post(
       '${Constants.apiUrl}/api/payments/pay',
       body,
@@ -721,36 +706,39 @@ class _DetallePrestamoScreenState extends State<DetallePrestamoScreen> {
       _showSnack(mensaje, Colors.red);
     }
   }
-  Future<bool?> _confirmDialog(String titulo, String contenido) =>
-      showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-          title: Text(
-            titulo,
-            style: const TextStyle(fontWeight: FontWeight.bold),
-          ),
-          content: Text(contenido),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text(
-                'Cancelar',
-                style: TextStyle(color: Colors.grey),
-              ),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-              child: const Text(
-                'Confirmar',
-                style: TextStyle(color: Colors.white),
-              ),
-            ),
-          ],
+
+  Future<dynamic> _confirmDialog(String titulo, String contenido) {
+    return showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(15),
         ),
-      );
+        title: Text(
+          titulo,
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+        content: Text(contenido),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text(
+              'Cancelar',
+              style: TextStyle(color: Colors.grey),
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+            child: const Text(
+              'Confirmar',
+              style: TextStyle(color: Colors.white),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   void _editarRutasCobrador() async {
     final cobradorId = widget.prestamo['cobrador_id']?.toString();
@@ -763,13 +751,14 @@ class _DetallePrestamoScreenState extends State<DetallePrestamoScreen> {
 
     final todasLasRutas = await cobradorService.getRutas();
     final rutasActuales = await cobradorService.getRutasDeCobrador(cobradorId);
-    List<int> seleccionadas =
+
+    List seleccionadas =
         rutasActuales.map((r) => int.parse(r['id'].toString())).toList();
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      shape: RoundedRectangleBorder(
+      shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(25)),
       ),
       builder: (ctx) => StatefulBuilder(
@@ -794,7 +783,10 @@ class _DetallePrestamoScreenState extends State<DetallePrestamoScreen> {
               ),
               const SizedBox(height: 16),
               todasLasRutas.isEmpty
-                  ? const Text('Sin rutas', style: TextStyle(color: Colors.grey))
+                  ? const Text(
+                      'Sin rutas',
+                      style: TextStyle(color: Colors.grey),
+                    )
                   : Wrap(
                       spacing: 8,
                       runSpacing: 4,
@@ -823,9 +815,11 @@ class _DetallePrestamoScreenState extends State<DetallePrestamoScreen> {
                     : () async {
                         final response = await ApiClient.put(
                           '${Constants.apiUrl}/api/rutas/cobrador/$cobradorId',
-                          {'rutas_ids': seleccionadas},
+                          {'ruta_ids': seleccionadas},
                         );
+
                         if (ctx.mounted) Navigator.pop(ctx);
+
                         _showSnack(
                           response?.statusCode == 200
                               ? '✅ Rutas actualizadas'
@@ -858,7 +852,7 @@ class _DetallePrestamoScreenState extends State<DetallePrestamoScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      shape: RoundedRectangleBorder(
+      shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(25)),
       ),
       builder: (ctx) => Padding(
@@ -885,30 +879,39 @@ class _DetallePrestamoScreenState extends State<DetallePrestamoScreen> {
               ),
             ),
             const SizedBox(height: 16),
-            ElevatedButton.icon(
-              onPressed: ctrl.text.trim().isEmpty
-                  ? null
-                  : () async {
-                      final success = await ObservacionService().createObservacion(
-                        'prestamo',
-                        widget.prestamo['id'] as int,
-                        ctrl.text.trim(),
-                      );
-                      if (ctx.mounted) Navigator.pop(ctx);
-                      _showSnack(
-                        success ? '✅ Enviado' : '❌ Error',
-                        success ? Colors.green : Colors.red,
-                      );
-                    },
-              icon: const Icon(Icons.send),
-              label: const Text(
-                'Enviar',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.orange,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-              ),
+            StatefulBuilder(
+              builder: (context, setStateModal) {
+                ctrl.addListener(() {
+                  if (context.mounted) setStateModal(() {});
+                });
+
+                return ElevatedButton.icon(
+                  onPressed: ctrl.text.trim().isEmpty
+                      ? null
+                      : () async {
+                          final success =
+                              await ObservacionService().createObservacion(
+                            'prestamo',
+                            widget.prestamo['id'] as int,
+                            ctrl.text.trim(),
+                          );
+                          if (ctx.mounted) Navigator.pop(ctx);
+                          _showSnack(
+                            success ? '✅ Enviado' : '❌ Error',
+                            success ? Colors.green : Colors.red,
+                          );
+                        },
+                  icon: const Icon(Icons.send),
+                  label: const Text(
+                    'Enviar',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.orange,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                );
+              },
             ),
           ],
         ),
@@ -925,7 +928,7 @@ class _DetallePrestamoScreenState extends State<DetallePrestamoScreen> {
   @override
   Widget build(BuildContext context) {
     final p = widget.prestamo;
-    final cliente = p['clientes'];
+    final cliente = p['clientes'] ?? {};
     final ruta = cliente['rutas'];
     final cobradorNombre = p['usuarios']?['nombre'] ?? 'Sin cobrador';
     final fechaInicio =
@@ -946,8 +949,7 @@ class _DetallePrestamoScreenState extends State<DetallePrestamoScreen> {
                 alignment: Alignment.centerLeft,
                 child: TextButton.icon(
                   onPressed: () => Navigator.pop(context),
-                  icon:
-                      const Icon(Icons.arrow_back_ios, color: Colors.black87),
+                  icon: const Icon(Icons.arrow_back_ios, color: Colors.black87),
                   label: const Text(
                     'Regresar',
                     style: TextStyle(color: Colors.black87, fontSize: 16),
@@ -970,8 +972,11 @@ class _DetallePrestamoScreenState extends State<DetallePrestamoScreen> {
                           children: [
                             TextButton.icon(
                               onPressed: _editarPrestamo,
-                              icon: const Icon(Icons.edit,
-                                  color: Colors.deepPurple, size: 18),
+                              icon: const Icon(
+                                Icons.edit,
+                                color: Colors.deepPurple,
+                                size: 18,
+                              ),
                               label: const Text(
                                 'Editar préstamo',
                                 style: TextStyle(
@@ -982,8 +987,11 @@ class _DetallePrestamoScreenState extends State<DetallePrestamoScreen> {
                             ),
                             TextButton.icon(
                               onPressed: _editarRutasCobrador,
-                              icon: const Icon(Icons.edit_road,
-                                  color: Colors.blue, size: 18),
+                              icon: const Icon(
+                                Icons.edit_road,
+                                color: Colors.blue,
+                                size: 18,
+                              ),
                               label: const Text(
                                 'Rutas cobrador',
                                 style: TextStyle(
@@ -994,12 +1002,16 @@ class _DetallePrestamoScreenState extends State<DetallePrestamoScreen> {
                             ),
                           ],
                         ),
-                      const Text('Nombre del Cliente',
-                          style: TextStyle(color: Colors.grey)),
+                      const Text(
+                        'Nombre del Cliente',
+                        style: TextStyle(color: Colors.grey),
+                      ),
                       Text(
-                        cliente['nombre'],
+                        cliente['nombre'] ?? 'Sin cliente',
                         style: const TextStyle(
-                            fontSize: 18, fontWeight: FontWeight.bold),
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                       if (cliente['telefono'] != null) ...[
                         const SizedBox(height: 4),
@@ -1015,11 +1027,10 @@ class _DetallePrestamoScreenState extends State<DetallePrestamoScreen> {
                         const SizedBox(height: 4),
                         Row(
                           children: [
-                            const Icon(Icons.map,
-                                size: 14, color: Colors.blue),
+                            const Icon(Icons.map, size: 14, color: Colors.blue),
                             const SizedBox(width: 6),
                             Text(
-                              ruta['nombre'],
+                              ruta['nombre'] ?? '',
                               style: const TextStyle(
                                 color: Colors.blue,
                                 fontSize: 13,
@@ -1031,23 +1042,32 @@ class _DetallePrestamoScreenState extends State<DetallePrestamoScreen> {
                       const SizedBox(height: 4),
                       Row(
                         children: [
-                          const Icon(Icons.person_outline,
-                              size: 14, color: Colors.grey),
+                          const Icon(
+                            Icons.person_outline,
+                            size: 14,
+                            color: Colors.grey,
+                          ),
                           const SizedBox(width: 6),
                           Text(
                             'Cobrador: $cobradorNombre',
                             style: const TextStyle(
-                                color: Colors.grey, fontSize: 13),
+                              color: Colors.grey,
+                              fontSize: 13,
+                            ),
                           ),
                         ],
                       ),
                       const SizedBox(height: 12),
-                      const Text('Monto Prestado',
-                          style: TextStyle(color: Colors.grey)),
+                      const Text(
+                        'Monto Prestado',
+                        style: TextStyle(color: Colors.grey),
+                      ),
                       Text(
                         '\$${double.parse(p['monto_prestado'].toString()).toStringAsFixed(0)}',
                         style: const TextStyle(
-                            fontSize: 18, fontWeight: FontWeight.bold),
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                       const SizedBox(height: 12),
                       Row(
@@ -1056,32 +1076,40 @@ class _DetallePrestamoScreenState extends State<DetallePrestamoScreen> {
                           Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text('Fecha Inicio',
-                                  style: TextStyle(color: Colors.grey)),
+                              const Text(
+                                'Fecha Inicio',
+                                style: TextStyle(color: Colors.grey),
+                              ),
                               Text(
                                 fechaInicio,
                                 style: const TextStyle(
-                                    fontWeight: FontWeight.bold),
+                                  fontWeight: FontWeight.bold,
+                                ),
                               ),
                             ],
                           ),
                           Column(
                             crossAxisAlignment: CrossAxisAlignment.end,
                             children: [
-                              const Text('Fecha Fin',
-                                  style: TextStyle(color: Colors.grey)),
+                              const Text(
+                                'Fecha Fin',
+                                style: TextStyle(color: Colors.grey),
+                              ),
                               Text(
                                 fechaFin,
                                 style: const TextStyle(
-                                    fontWeight: FontWeight.bold),
+                                  fontWeight: FontWeight.bold,
+                                ),
                               ),
                             ],
                           ),
                         ],
                       ),
                       const SizedBox(height: 12),
-                      const Text('Saldo Pendiente',
-                          style: TextStyle(color: Colors.grey)),
+                      const Text(
+                        'Saldo Pendiente',
+                        style: TextStyle(color: Colors.grey),
+                      ),
                       Text(
                         '\$${saldoPendiente.toStringAsFixed(0)}',
                         style: const TextStyle(
@@ -1107,21 +1135,21 @@ class _DetallePrestamoScreenState extends State<DetallePrestamoScreen> {
                       const Text(
                         'Registrar Abono',
                         style: TextStyle(
-                            fontWeight: FontWeight.bold, fontSize: 16),
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
                       ),
                       const SizedBox(height: 12),
                       TextField(
                         controller: _montoController,
                         keyboardType: TextInputType.number,
-                        inputFormatters: [
-                          FilteringTextInputFormatter.digitsOnly
-                        ],
+                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                         decoration: InputDecoration(
                           prefixText: '\$ ',
                           hintText: 'Monto del abono',
-                          helperText: 'Máx: \$${saldoPendiente.toStringAsFixed(0)}',
-                          helperStyle:
-                              const TextStyle(color: Colors.grey),
+                          helperText:
+                              'Máx: \$${saldoPendiente.toStringAsFixed(0)}',
+                          helperStyle: const TextStyle(color: Colors.grey),
                         ),
                       ),
                       const SizedBox(height: 12),

@@ -13,8 +13,9 @@ class CobradoresScreen extends StatefulWidget {
 
 class _CobradoresScreenState extends State<CobradoresScreen> {
   final CobradorService _cobradorService = CobradorService();
-  List<dynamic> _cobradores = [];
-  List<dynamic> _rutas = [];
+
+  List _cobradores = [];
+  List _rutas = [];
   bool _isLoading = true;
   bool _esAdmin = false;
 
@@ -25,9 +26,14 @@ class _CobradoresScreenState extends State<CobradoresScreen> {
   }
 
   Future<void> _cargarDatos() async {
+    if (!mounted) return;
+
     setState(() => _isLoading = true);
+
     final prefs = await SharedPreferences.getInstance();
-    final rol = prefs.getString('user_rol') ?? 'cobrador';
+    final rol =
+        prefs.getString('user_rol') ?? prefs.getString('userrol') ?? 'cobrador';
+
     _esAdmin = rol == 'admin';
 
     if (_esAdmin) {
@@ -35,12 +41,16 @@ class _CobradoresScreenState extends State<CobradoresScreen> {
         _cobradorService.getCobradores(),
         _cobradorService.getRutas(),
       ]);
+
+      if (!mounted) return;
+
       setState(() {
         _cobradores = results[0];
         _rutas = results[1];
         _isLoading = false;
       });
     } else {
+      if (!mounted) return;
       setState(() => _isLoading = false);
     }
   }
@@ -56,11 +66,14 @@ class _CobradoresScreenState extends State<CobradoresScreen> {
             children: [
               Icon(Icons.lock_outline, size: 64, color: Colors.grey[400]),
               const SizedBox(height: 16),
-              const Text('Acceso restringido',
-                  style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.grey)),
+              const Text(
+                'Acceso restringido',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey,
+                ),
+              ),
               const SizedBox(height: 8),
               const Text(
                 'Solo los administradores\npueden ver esta sección.',
@@ -84,16 +97,21 @@ class _CobradoresScreenState extends State<CobradoresScreen> {
               ),
               backgroundColor: const Color(0xFFA5D6A7),
               icon: const Icon(Icons.person_add),
-              label: const Text('Nuevo Cobrador',
-                  style: TextStyle(fontWeight: FontWeight.bold)),
+              label: const Text(
+                'Nuevo Cobrador',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
             )
           : null,
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _cobradores.isEmpty
               ? const Center(
-                  child: Text('No hay cobradores registrados.',
-                      style: TextStyle(color: Colors.grey)))
+                  child: Text(
+                    'No hay cobradores registrados.',
+                    style: TextStyle(color: Colors.grey),
+                  ),
+                )
               : ListView.builder(
                   padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
                   itemCount: _cobradores.length,
@@ -103,32 +121,40 @@ class _CobradoresScreenState extends State<CobradoresScreen> {
                             ?.map((r) => r['nombre'].toString())
                             .join(', ') ??
                         'Sin rutas';
+
                     return Card(
                       margin: const EdgeInsets.only(bottom: 12),
                       shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(15)),
+                        borderRadius: BorderRadius.circular(15),
+                      ),
                       child: ListTile(
                         leading: CircleAvatar(
                           backgroundColor: Colors.green[200],
                           child: Text(
-                            cobrador['nombre'].toString()[0].toUpperCase(),
+                            cobrador['nombre'].toString().isNotEmpty
+                                ? cobrador['nombre'].toString()[0].toUpperCase()
+                                : '?',
                             style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: Colors.white),
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
                           ),
                         ),
-                        title: Text(cobrador['nombre'] ?? 'Sin nombre',
-                            style: const TextStyle(
-                                fontWeight: FontWeight.bold)),
+                        title: Text(
+                          cobrador['nombre'] ?? 'Sin nombre',
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
                         subtitle: Row(
                           children: [
                             const Icon(Icons.route,
                                 size: 13, color: Colors.green),
                             const SizedBox(width: 4),
                             Expanded(
-                              child: Text(rutas,
-                                  style: const TextStyle(fontSize: 12),
-                                  overflow: TextOverflow.ellipsis),
+                              child: Text(
+                                rutas,
+                                style: const TextStyle(fontSize: 12),
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ),
                           ],
                         ),
@@ -141,16 +167,16 @@ class _CobradoresScreenState extends State<CobradoresScreen> {
   }
 }
 
-// ── Función global reutilizable ───────────────────────────────
 void abrirFormularioNuevoCobrador(
   BuildContext context,
-  List<dynamic> rutas,
-  VoidCallback onCreado,
+  List rutas,
+  Future<void> Function() onCreado,
 ) {
   final nombreController = TextEditingController();
   final emailController = TextEditingController();
   final passwordController = TextEditingController();
   final CobradorService cobradorService = CobradorService();
+
   List<int> rutasSeleccionadas = [];
   bool obscurePassword = true;
   bool guardando = false;
@@ -174,18 +200,21 @@ void abrirFormularioNuevoCobrador(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text('Nuevo Cobrador',
-                  style: TextStyle(
-                      fontSize: 20, fontWeight: FontWeight.bold)),
+              const Text(
+                'Nuevo Cobrador',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
               const SizedBox(height: 20),
-
-              // Nombre (solo letras)
               TextField(
                 controller: nombreController,
                 keyboardType: TextInputType.name,
                 inputFormatters: [
                   FilteringTextInputFormatter.allow(
-                      RegExp(r'[a-zA-ZáéíóúÁÉÍÓÚñÑ\s]')),
+                    RegExp(r'[a-zA-ZáéíóúÁÉÍÓÚñÑ\s]'),
+                  ),
                 ],
                 decoration: const InputDecoration(
                   labelText: 'Nombre completo *',
@@ -194,8 +223,6 @@ void abrirFormularioNuevoCobrador(
                 ),
               ),
               const SizedBox(height: 12),
-
-              // Correo
               TextField(
                 controller: emailController,
                 keyboardType: TextInputType.emailAddress,
@@ -206,8 +233,6 @@ void abrirFormularioNuevoCobrador(
                 ),
               ),
               const SizedBox(height: 12),
-
-              // Contraseña
               TextField(
                 controller: passwordController,
                 obscureText: obscurePassword,
@@ -216,35 +241,44 @@ void abrirFormularioNuevoCobrador(
                   prefixIcon: const Icon(Icons.lock_outline),
                   hintText: 'Mínimo 6 caracteres',
                   suffixIcon: IconButton(
-                    icon: Icon(obscurePassword
-                        ? Icons.visibility_off
-                        : Icons.visibility),
+                    icon: Icon(
+                      obscurePassword
+                          ? Icons.visibility_off
+                          : Icons.visibility,
+                    ),
                     onPressed: () => setModalState(
-                        () => obscurePassword = !obscurePassword),
+                      () => obscurePassword = !obscurePassword,
+                    ),
                   ),
                 ),
               ),
               const SizedBox(height: 20),
-
-              // Rutas chips
-              const Text('Rutas asignadas *',
-                  style: TextStyle(
-                      fontWeight: FontWeight.w600, fontSize: 15)),
+              const Text(
+                'Rutas asignadas *',
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 15,
+                ),
+              ),
               const SizedBox(height: 4),
-              const Text('Selecciona una o más rutas',
-                  style: TextStyle(color: Colors.grey, fontSize: 12)),
+              const Text(
+                'Selecciona una o más rutas',
+                style: TextStyle(color: Colors.grey, fontSize: 12),
+              ),
               const SizedBox(height: 8),
               rutas.isEmpty
-                  ? const Text('No hay rutas disponibles',
-                      style: TextStyle(color: Colors.grey))
+                  ? const Text(
+                      'No hay rutas disponibles',
+                      style: TextStyle(color: Colors.grey),
+                    )
                   : Wrap(
                       spacing: 8,
                       runSpacing: 4,
                       children: rutas.map((ruta) {
-                        final id = ruta['id'] as int;
+                        final id = int.parse(ruta['id'].toString());
                         final nombre = ruta['nombre'].toString();
-                        final seleccionada =
-                            rutasSeleccionadas.contains(id);
+                        final seleccionada = rutasSeleccionadas.contains(id);
+
                         return FilterChip(
                           label: Text(nombre),
                           selected: seleccionada,
@@ -253,7 +287,9 @@ void abrirFormularioNuevoCobrador(
                           onSelected: (selected) {
                             setModalState(() {
                               if (selected) {
-                                rutasSeleccionadas.add(id);
+                                if (!rutasSeleccionadas.contains(id)) {
+                                  rutasSeleccionadas.add(id);
+                                }
                               } else {
                                 rutasSeleccionadas.remove(id);
                               }
@@ -263,8 +299,6 @@ void abrirFormularioNuevoCobrador(
                       }).toList(),
                     ),
               const SizedBox(height: 24),
-
-              // Botón guardar
               guardando
                   ? const Center(child: CircularProgressIndicator())
                   : ElevatedButton.icon(
@@ -278,33 +312,40 @@ void abrirFormularioNuevoCobrador(
                             password.isEmpty) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
-                                content: Text(
-                                    'Todos los campos son requeridos')),
+                              content:
+                                  Text('Todos los campos son requeridos'),
+                            ),
                           );
                           return;
                         }
+
                         if (password.length < 6) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
-                                content: Text(
-                                    'Contraseña mínimo 6 caracteres')),
+                              content:
+                                  Text('Contraseña mínimo 6 caracteres'),
+                            ),
                           );
                           return;
                         }
+
                         if (rutasSeleccionadas.isEmpty) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
-                                content: Text(
-                                    'Selecciona al menos una ruta')),
+                              content:
+                                  Text('Selecciona al menos una ruta'),
+                            ),
                           );
                           return;
                         }
+
                         if (!RegExp(r'^[\w\.-]+@[\w\.-]+\.\w+$')
                             .hasMatch(email)) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
-                                content:
-                                    Text('Correo electrónico inválido')),
+                              content:
+                                  Text('Correo electrónico inválido'),
+                            ),
                           );
                           return;
                         }
@@ -324,25 +365,32 @@ void abrirFormularioNuevoCobrador(
                           Navigator.pop(context);
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
-                              content: Text(success
-                                  ? '✅ Cobrador creado correctamente'
-                                  : '❌ Error al crear cobrador'),
+                              content: Text(
+                                success
+                                    ? '✅ Cobrador creado correctamente'
+                                    : '❌ Error al crear cobrador',
+                              ),
                               backgroundColor:
                                   success ? Colors.green : Colors.red,
                             ),
                           );
-                          if (success) onCreado();
+
+                          if (success) {
+                            onCreado();
+                          }
                         }
                       },
                       icon: const Icon(Icons.save),
-                      label: const Text('Guardar Cobrador',
-                          style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold)),
+                      label: const Text(
+                        'Guardar Cobrador',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFFA5D6A7),
-                        padding:
-                            const EdgeInsets.symmetric(vertical: 14),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
                       ),
                     ),
             ],

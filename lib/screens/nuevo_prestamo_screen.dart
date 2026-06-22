@@ -32,11 +32,11 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
   bool _isLoading = false;
   bool _esAdmin = false;
 
-  List<dynamic> _cobradores = [];
+  List _cobradores = [];
   String? _cobradorSeleccionadoId;
   String? _cobradorSeleccionadoNombre;
 
-  List<dynamic> _rutasCobrador = [];
+  List _rutasCobrador = [];
   int? _rutaSeleccionadaId;
   String? _rutaSeleccionadaNombre;
 
@@ -53,7 +53,8 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
 
   Future<void> _cargarDatos() async {
     final prefs = await SharedPreferences.getInstance();
-    final rol = prefs.getString('user_rol') ?? 'cobrador';
+    final rol =
+        prefs.getString('user_rol') ?? prefs.getString('userrol') ?? 'cobrador';
     _userId = prefs.getString('user_id');
 
     if (!mounted) return;
@@ -84,6 +85,7 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
   }
 
   void _snack(String mensaje, Color color) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(mensaje), backgroundColor: color),
     );
@@ -119,14 +121,17 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
       _snack('El nombre del cliente es requerido', Colors.red);
       return;
     }
+
     if (nombre.length < 3) {
       _snack('El nombre debe tener al menos 3 caracteres', Colors.red);
       return;
     }
+
     if (telefono.isNotEmpty && (telefono.length < 7 || telefono.length > 15)) {
       _snack('El teléfono debe tener entre 7 y 15 dígitos', Colors.red);
       return;
     }
+
     if (_monto < _montoMin || _monto > _montoMax) {
       _snack(
         'El monto debe estar entre \$${_montoMin.toStringAsFixed(0)} y \$${_montoMax.toStringAsFixed(0)}',
@@ -134,41 +139,63 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
       );
       return;
     }
+
     if (_totalPagar <= 0) {
       _snack('Escribe la cantidad total a pagar', Colors.red);
       return;
     }
+
     if (_totalPagar <= _monto) {
-      _snack('La cantidad a pagar debe ser mayor que el monto prestado', Colors.red);
+      _snack(
+        'La cantidad a pagar debe ser mayor que el monto prestado',
+        Colors.red,
+      );
       return;
     }
+
     if (_diasPlazo <= 0) {
       _snack('Escribe el plazo en días', Colors.red);
       return;
     }
+
     if (_totalPagar > _totalPagarMax) {
-      _snack('El total a pagar no puede superar \$${(_totalPagarMax/1000).toStringAsFixed(0)}K', Colors.red);
+      _snack(
+        'El total a pagar no puede superar \$${(_totalPagarMax / 1000).toStringAsFixed(0)}K',
+        Colors.red,
+      );
       return;
     }
+
     if (_diasPlazo > _diasPlazoMax) {
       _snack('El plazo máximo es $_diasPlazoMax días', Colors.red);
       return;
     }
+
     if (_esAdmin && _cobradorSeleccionadoId == null) {
       _snack('Selecciona un cobrador responsable', Colors.red);
       return;
     }
+
+    if (!_esAdmin && _userId == null) {
+      _snack('No se pudo identificar el cobrador actual', Colors.red);
+      return;
+    }
+
     if (_rutaSeleccionadaId == null) {
       _snack('Selecciona una ruta', Colors.red);
       return;
     }
 
-    final confirmar = await showDialog<bool>(
+    final cobradorIdFinal = _esAdmin ? _cobradorSeleccionadoId : _userId;
+
+    final confirmar = await showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-        title: const Text('¿Confirmar préstamo?',
-            style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text(
+          '¿Confirmar préstamo?',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -177,18 +204,31 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
             _confirmFila('Monto prestado', '\$${_monto.toStringAsFixed(0)}'),
             _confirmFila('Total a pagar', '\$${_totalPagar.toStringAsFixed(0)}'),
             _confirmFila('Plazo', '$_diasPlazo días'),
-            _confirmFila('Cuota diaria', '\$${_cuotaDiaria.toStringAsFixed(0)}/día'),
+            _confirmFila(
+              'Cuota diaria',
+              '\$${_cuotaDiaria.toStringAsFixed(0)}/día',
+            ),
+            if (_esAdmin && _cobradorSeleccionadoNombre != null)
+              _confirmFila('Cobrador', _cobradorSeleccionadoNombre!),
+            if (_rutaSeleccionadaNombre != null)
+              _confirmFila('Ruta', _rutaSeleccionadaNombre!),
           ],
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancelar', style: TextStyle(color: Colors.grey)),
+            child: const Text(
+              'Cancelar',
+              style: TextStyle(color: Colors.grey),
+            ),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.amber),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Crear', style: TextStyle(color: Colors.black87)),
+            child: const Text(
+              'Crear',
+              style: TextStyle(color: Colors.black87),
+            ),
           ),
         ],
       ),
@@ -214,7 +254,7 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
           'monto_prestado': _monto,
           'monto_total': _totalPagar,
           'dias_plazo': _diasPlazo,
-          'cobrador_id': _cobradorSeleccionadoId,
+          'cobrador_id': cobradorIdFinal,
           'ruta_id': _rutaSeleccionadaId,
           'modo_interes': 'manual',
         }),
@@ -225,7 +265,7 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
 
       if (response.statusCode == 201) {
         _snack('✅ Préstamo creado exitosamente', Colors.green);
-        Navigator.pop(context);
+        Navigator.pop(context, true);
       } else {
         final decoded = jsonDecode(response.body);
         final error = decoded['error'] ?? 'Error desconocido';
@@ -253,8 +293,10 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Nuevo Préstamo',
-            style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text(
+          'Nuevo Préstamo',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
         centerTitle: true,
         backgroundColor: const Color(0xFFFFF9C4),
         leading: IconButton(
@@ -268,8 +310,10 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text('Datos del Cliente',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            const Text(
+              'Datos del Cliente',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 12),
             TextField(
               controller: _nombreController,
@@ -306,8 +350,10 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
             ),
             const SizedBox(height: 20),
             if (_esAdmin) ...[
-              const Text('Cobrador Responsable',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              const Text(
+                'Cobrador Responsable',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
                 decoration: const InputDecoration(
@@ -316,7 +362,7 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
                 ),
                 value: _cobradorSeleccionadoId,
                 items: _cobradores
-                    .map(
+                    .map<DropdownMenuItem<String>>(
                       (c) => DropdownMenuItem<String>(
                         value: c['id'].toString(),
                         child: Text(c['nombre']),
@@ -332,6 +378,7 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
                     _rutaSeleccionadaId = null;
                     _rutaSeleccionadaNombre = null;
                   });
+
                   if (value != null) {
                     await _cargarRutasDeCobrador(value);
                   }
@@ -339,8 +386,10 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
               ),
               const SizedBox(height: 20),
             ],
-            const Text('Ruta',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            const Text(
+              'Ruta',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 12),
             _rutasCobrador.isEmpty
                 ? Container(
@@ -365,7 +414,7 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
                     ),
                     value: _rutaSeleccionadaId,
                     items: _rutasCobrador
-                        .map(
+                        .map<DropdownMenuItem<int>>(
                           (r) => DropdownMenuItem<int>(
                             value: r['id'] as int,
                             child: Text(r['nombre']),
@@ -380,8 +429,10 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
                     }),
                   ),
             const SizedBox(height: 20),
-            const Text('Monto a Prestar',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            const Text(
+              'Monto a Prestar',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 12),
             TextField(
               controller: _montoController,
@@ -396,8 +447,10 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
               onChanged: _onMontoChange,
             ),
             const SizedBox(height: 20),
-            const Text('Total a Pagar',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            const Text(
+              'Total a Pagar',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 12),
             TextField(
               controller: _totalPagarController,
@@ -412,8 +465,10 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
               onChanged: _onTotalPagarChange,
             ),
             const SizedBox(height: 20),
-            const Text('Plazo',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            const Text(
+              'Plazo',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 12),
             TextField(
               controller: _diasPlazoController,
@@ -436,19 +491,33 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
               ),
               child: Column(
                 children: [
-                  const Text('Resumen del Préstamo',
-                      style: TextStyle(
-                          fontWeight: FontWeight.bold, fontSize: 16)),
+                  const Text(
+                    'Resumen del Préstamo',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
                   const Divider(),
-                  _resumenFila('Capital prestado:', '\$${_monto.toStringAsFixed(0)}'),
-                  _resumenFila('Total a pagar:', '\$${_totalPagar.toStringAsFixed(0)}',
-                      bold: true),
-                  _resumenFila('Cuota diaria:',
-                      '\$${_cuotaDiaria.toStringAsFixed(0)}/día',
-                      bold: true, color: Colors.green),
+                  _resumenFila(
+                    'Capital prestado:',
+                    '\$${_monto.toStringAsFixed(0)}',
+                  ),
+                  _resumenFila(
+                    'Total a pagar:',
+                    '\$${_totalPagar.toStringAsFixed(0)}',
+                    bold: true,
+                  ),
+                  _resumenFila(
+                    'Cuota diaria:',
+                    '\$${_cuotaDiaria.toStringAsFixed(0)}/día',
+                    bold: true,
+                    color: Colors.green,
+                  ),
                   _resumenFila('Plazo:', '$_diasPlazo días'),
-                  // 👇 AGREGAR DESPUÉS de _resumenFila('Plazo:', '$_diasPlazo días'),
-                  if (_monto > _montoMax || _totalPagar > _totalPagarMax || _diasPlazo > _diasPlazoMax)
+                  if (_monto > _montoMax ||
+                      _totalPagar > _totalPagarMax ||
+                      _diasPlazo > _diasPlazoMax)
                     Padding(
                       padding: const EdgeInsets.only(top: 8),
                       child: Container(
@@ -462,8 +531,15 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
                           children: [
                             Icon(Icons.warning, color: Colors.red, size: 16),
                             SizedBox(width: 4),
-                            Text('⚠️ Algunos valores exceden los límites máximos', 
-                                style: TextStyle(color: Colors.red, fontSize: 12)),
+                            Expanded(
+                              child: Text(
+                                '⚠️ Algunos valores exceden los límites máximos',
+                                style: TextStyle(
+                                  color: Colors.red,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
                           ],
                         ),
                       ),
@@ -499,8 +575,12 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
     );
   }
 
-  Widget _resumenFila(String label, String valor,
-      {bool bold = false, Color color = Colors.black87}) {
+  Widget _resumenFila(
+    String label,
+    String valor, {
+    bool bold = false,
+    Color color = Colors.black87,
+  }) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(

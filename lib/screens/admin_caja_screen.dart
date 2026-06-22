@@ -13,7 +13,7 @@ class AdminCajaScreen extends StatefulWidget {
 
 class _AdminCajaScreenState extends State<AdminCajaScreen> {
   Map<String, dynamic>? resumen;
-  List<dynamic> cajas = [];
+  List cajas = [];
   bool isLoading = true;
   DateTime fechaSeleccionada = DateTime.now();
   final fmt = NumberFormat('#,##0', 'es_CO');
@@ -27,6 +27,8 @@ class _AdminCajaScreenState extends State<AdminCajaScreen> {
   String get fechaStr => DateFormat('yyyy-MM-dd').format(fechaSeleccionada);
 
   Future<void> cargarResumen() async {
+    if (!mounted) return;
+
     setState(() => isLoading = true);
 
     final res = await ApiClient.get(
@@ -36,17 +38,25 @@ class _AdminCajaScreenState extends State<AdminCajaScreen> {
     if (!mounted) return;
 
     if (res != null && res.statusCode == 200) {
-      final data = jsonDecode(res.body);
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+
       setState(() {
-        resumen = data['resumen'];
+        resumen = data['resumen'] as Map<String, dynamic>?;
         cajas = data['cajas'] ?? [];
         isLoading = false;
       });
     } else {
       setState(() => isLoading = false);
+
+      String mensaje = 'No se pudo cargar el resumen de caja';
+      try {
+        final body = jsonDecode(res?.body ?? '{}');
+        mensaje = body['error'] ?? mensaje;
+      } catch (_) {}
+
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('No se pudo cargar el resumen de caja'),
+        SnackBar(
+          content: Text(mensaje),
           backgroundColor: Colors.red,
         ),
       );
@@ -54,7 +64,7 @@ class _AdminCajaScreenState extends State<AdminCajaScreen> {
   }
 
   Future<void> abrirModalBase(
-    Map<String, dynamic>? cajaExistente,
+    Map? cajaExistente,
     String cobradorId,
     String cobradorNombre,
   ) async {
@@ -116,9 +126,29 @@ class _AdminCajaScreenState extends State<AdminCajaScreen> {
                 if (ctx.mounted) Navigator.pop(ctx);
 
                 if (!mounted) return;
+
                 if (res != null &&
                     (res.statusCode == 200 || res.statusCode == 201)) {
-                  cargarResumen();
+                  await cargarResumen();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Base registrada correctamente'),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                } else {
+                  String mensaje = 'No se pudo guardar la base';
+                  try {
+                    final body = jsonDecode(res?.body ?? '{}');
+                    mensaje = body['error'] ?? mensaje;
+                  } catch (_) {}
+
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(mensaje),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
                 }
               },
               style: ElevatedButton.styleFrom(
@@ -139,7 +169,7 @@ class _AdminCajaScreenState extends State<AdminCajaScreen> {
     );
   }
 
-  Future<void> cerrarCaja(Map<String, dynamic> caja) async {
+  Future<void> cerrarCaja(Map caja) async {
     final ctrl = TextEditingController(
       text: (caja['totalentregado'] ?? caja['totalcobrado'] ?? 0).toString(),
     );
@@ -189,10 +219,9 @@ class _AdminCajaScreenState extends State<AdminCajaScreen> {
                 final monto = double.tryParse(ctrl.text.trim());
                 if (monto == null || monto < 0) return;
 
-                final res = await ApiClient.post(
-                  '${Constants.apiUrl}/api/caja/cerrar',
+                final res = await ApiClient.put(
+                  '${Constants.apiUrl}/api/caja/${caja['id']}/cerrar',
                   {
-                    'caja_id': caja['id'],
                     'total_entregado': monto,
                   },
                 );
@@ -202,7 +231,7 @@ class _AdminCajaScreenState extends State<AdminCajaScreen> {
                 if (!mounted) return;
 
                 if (res != null && res.statusCode == 200) {
-                  cargarResumen();
+                  await cargarResumen();
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
                       content: Text('Caja cerrada correctamente'),
@@ -210,9 +239,15 @@ class _AdminCajaScreenState extends State<AdminCajaScreen> {
                     ),
                   );
                 } else {
+                  String mensaje = 'No se pudo cerrar la caja';
+                  try {
+                    final body = jsonDecode(res?.body ?? '{}');
+                    mensaje = body['error'] ?? mensaje;
+                  } catch (_) {}
+
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('No se pudo cerrar la caja'),
+                    SnackBar(
+                      content: Text(mensaje),
                       backgroundColor: Colors.red,
                     ),
                   );
@@ -253,12 +288,14 @@ class _AdminCajaScreenState extends State<AdminCajaScreen> {
   @override
   Widget build(BuildContext context) {
     final totalBase =
-        (resumen?['total_base_entregada'] as num?)?.toDouble() ?? 0;
+        (resumen?['totalbaseentregada'] as num?)?.toDouble() ?? 0;
     final totalCobrado =
-        (resumen?['total_cobrado'] as num?)?.toDouble() ?? 0;
+        (resumen?['totalcobrado'] as num?)?.toDouble() ?? 0;
     final totalEntregado =
-        (resumen?['total_entregado'] as num?)?.toDouble() ?? 0;
-    final pendienteGeneral = totalBase + totalCobrado - totalEntregado;
+        (resumen?['totalentregado'] as num?)?.toDouble() ?? 0;
+    final saldoCaja =
+        (resumen?['saldocaja'] as num?)?.toDouble() ??
+            (totalBase + totalCobrado - totalEntregado);
 
     return Scaffold(
       appBar: AppBar(
@@ -320,29 +357,41 @@ class _AdminCajaScreenState extends State<AdminCajaScreen> {
                       ),
                       const SizedBox(width: 12),
                       _statCard(
-                        'Pendiente general',
-                        '\$${fmt.format(pendienteGeneral)}',
-                        pendienteGeneral >= 0
+                        'Saldo caja',
+                        '\$${fmt.format(saldoCaja)}',
+                        saldoCaja >= 0
                             ? Colors.amber.shade50
                             : Colors.red.shade50,
                         Icons.pending_actions,
-                        pendienteGeneral >= 0 ? Colors.amber : Colors.red,
+                        saldoCaja >= 0 ? Colors.amber : Colors.red,
                       ),
                     ],
                   ),
                   const SizedBox(height: 24),
                   const Text(
                     'Cajas por cobrador',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 17,
+                    ),
                   ),
                   const SizedBox(height: 12),
+                  if (cajas.isEmpty)
+                    const Card(
+                      child: Padding(
+                        padding: EdgeInsets.all(16),
+                        child: Text(
+                          'No hay cajas registradas para esta fecha.',
+                          style: TextStyle(color: Colors.grey),
+                        ),
+                      ),
+                    ),
                   ...cajas.map((caja) {
-                    final base =
-                        ((caja['baseentregada'] ?? 0) as num).toDouble();
+                    final base = ((caja['baseentregada'] ?? 0) as num).toDouble();
                     final cobrado =
                         ((caja['totalcobrado'] ?? 0) as num).toDouble();
                     final entregado =
-                        ((caja['totalentregado'] ?? 0) as num?)?.toDouble();
+                        (caja['totalentregado'] as num?)?.toDouble();
                     final cerrada = entregado != null && entregado > 0;
                     final pendiente = base + cobrado - (entregado ?? 0);
 
@@ -405,7 +454,10 @@ class _AdminCajaScreenState extends State<AdminCajaScreen> {
                               'Entregado físicamente',
                               entregado ?? 0,
                             ),
-                            _filaMonto('Pendiente por entregar', pendiente),
+                            _filaMonto(
+                              'Pendiente por entregar',
+                              pendiente,
+                            ),
                             const SizedBox(height: 14),
                             Row(
                               children: [
