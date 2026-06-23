@@ -142,30 +142,26 @@ class ApiClient {
   }
 
   static Future<http.Response?> deleteWithBody(
-    String url,
-    Map<String, dynamic> body,
-  ) async {
+      String url, Map<String, dynamic> body) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('jwt_token') ?? '';
+      // Usa el mismo key que usan get() y post() en este archivo
+      final token = prefs.getString('token') ?? '';
 
       final request = http.Request('DELETE', Uri.parse(url));
       request.headers['Content-Type'] = 'application/json';
       request.headers['Authorization'] = 'Bearer $token';
       request.body = jsonEncode(body);
 
-      final streamedResponse = await request.send();
+      final streamedResponse = await http.Client().send(request);
       final response = await http.Response.fromStream(streamedResponse);
 
       if (response.statusCode == 401) {
-        _mostrarSnackBar('Sesión expirada. Inicia sesión nuevamente.');
-        await _cerrarSesion();
+        // mismo manejo que el resto de métodos de ApiClient
         return null;
       }
-
       return response;
     } catch (e) {
-      _mostrarSnackBar('❌ Sin conexión al servidor');
       return null;
     }
   }
