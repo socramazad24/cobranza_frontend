@@ -200,6 +200,7 @@ class _GastosScreenState extends State<GastosScreen> {
       backgroundColor: const Color(0xFFF3E5F5),
       floatingActionButton: _esAdmin
           ? FloatingActionButton.extended(
+              heroTag: null,
               onPressed: _abrirFormularioGasto,
               backgroundColor: const Color(0xFFCE93D8),
               icon: const Icon(Icons.add),

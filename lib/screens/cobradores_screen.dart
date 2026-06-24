@@ -90,6 +90,7 @@ class _CobradoresScreenState extends State<CobradoresScreen> {
       backgroundColor: const Color(0xFFE8F5E9),
       floatingActionButton: _esAdmin
           ? FloatingActionButton.extended(
+              heroTag: null,
               onPressed: () => abrirFormularioNuevoCobrador(
                 context,
                 _rutas,

@@ -239,7 +239,6 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
     setState(() => _isLoading = true);
 
     final token = await _getToken();
-
     try {
       final response = await http.post(
         Uri.parse('${Constants.apiUrl}/api/loans'),
@@ -318,11 +317,8 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
             TextField(
               controller: _nombreController,
               keyboardType: TextInputType.name,
-              inputFormatters: [
-                FilteringTextInputFormatter.allow(
-                  RegExp(r'[a-zA-ZáéíóúÁÉÍÓÚñÑ\s]'),
-                ),
-              ],
+              // CORRECTO — incluye tildes, ñ, ü y caracteres latinos
+              inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[a-zA-ZáéíóúÁÉÍÓÚñÑüÜ\s]'))],
               decoration: const InputDecoration(
                 labelText: 'Nombre completo *',
                 prefixIcon: Icon(Icons.person),

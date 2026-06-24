@@ -355,6 +355,7 @@ class _RutasScreenState extends State<RutasScreen> {
       ),
       backgroundColor: const Color(0xFFE1F5FE),
       floatingActionButton: FloatingActionButton.extended(
+        heroTag: null,
         onPressed: _crearRuta,
         backgroundColor: Colors.blue,
         icon: const Icon(Icons.add, color: Colors.white),

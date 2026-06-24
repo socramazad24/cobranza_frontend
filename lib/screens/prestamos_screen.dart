@@ -47,10 +47,19 @@ class _PrestamosScreenState extends State<PrestamosScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFFBE9E7),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => const NuevoPrestamoScreen()),
-        ).then((_) => _cargarPrestamos()),
+        heroTag: null,
+        onPressed: () async {
+          final resultado = await Navigator.push<bool>(
+            context,
+            MaterialPageRoute(
+              builder: (_) => const NuevoPrestamoScreen(),
+            ),
+          );
+
+          if (resultado == true && mounted) {
+            await _cargarPrestamos();
+          }
+        },
         backgroundColor: const Color(0xFFFFAB91),
         icon: const Icon(Icons.add),
         label: const Text(
@@ -75,7 +84,8 @@ class _PrestamosScreenState extends State<PrestamosScreen> {
                     final p = _prestamos[index];
                     final cliente = p['clientes'] ?? {};
                     final ruta = cliente['rutas'];
-                    final cobrador = p['usuarios']?['nombre'] ?? 'Sin cobrador';
+                    final cobrador =
+                        p['usuarios']?['nombre'] ?? 'Sin cobrador';
 
                     return Card(
                       margin: const EdgeInsets.only(bottom: 12),
@@ -92,7 +102,9 @@ class _PrestamosScreenState extends State<PrestamosScreen> {
                         ),
                         title: Text(
                           cliente['nombre'] ?? 'Sin cliente',
-                          style: const TextStyle(fontWeight: FontWeight.bold),
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                         subtitle: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -144,12 +156,19 @@ class _PrestamosScreenState extends State<PrestamosScreen> {
                             fontWeight: FontWeight.bold,
                           ),
                         ),
-                        onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => DetallePrestamoScreen(prestamo: p),
-                          ),
-                        ).then((_) => _cargarPrestamos()),
+                        onTap: () async {
+                          final resultado = await Navigator.push<bool>(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) =>
+                                  DetallePrestamoScreen(prestamo: p),
+                            ),
+                          );
+
+                          if (resultado == true && mounted) {
+                            await _cargarPrestamos();
+                          }
+                        },
                       ),
                     );
                   },

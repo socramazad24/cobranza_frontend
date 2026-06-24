@@ -342,6 +342,7 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
       ),
       backgroundColor: const Color(0xFFF5F5F5),
       floatingActionButton: FloatingActionButton.extended(
+        heroTag: null,
         onPressed: () =>
             abrirFormularioNuevoCobrador(context, _rutas, _cargarDatos),
         backgroundColor: const Color(0xFF81D4FA),
