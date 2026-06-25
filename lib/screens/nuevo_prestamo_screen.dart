@@ -53,17 +53,26 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
 
   Future<void> _cargarDatos() async {
     final prefs = await SharedPreferences.getInstance();
-    final rol =
-        prefs.getString('user_rol') ?? prefs.getString('userrol') ?? 'cobrador';
-    _userId = prefs.getString('user_id');
+
+    final rolGuardado = (prefs.getString('userrol') ?? '').trim().toLowerCase();
+    _userId = prefs.getString('userid');
+
+    final esAdmin = rolGuardado == 'admin';
 
     if (!mounted) return;
-    setState(() => _esAdmin = rol == 'admin');
+    setState(() {
+      _esAdmin = esAdmin;
+    });
 
     if (_esAdmin) {
       final cobradores = await CobradorService().getCobradores();
       if (!mounted) return;
-      setState(() => _cobradores = cobradores);
+      setState(() {
+        _cobradores = cobradores;
+        _rutasCobrador = [];
+        _rutaSeleccionadaId = null;
+        _rutaSeleccionadaNombre = null;
+      });
     } else if (_userId != null) {
       await _cargarRutasDeCobrador(_userId!);
     }
@@ -81,7 +90,7 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
 
   Future<String?> _getToken() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString('jwt_token');
+    return prefs.getString('jwttoken');
   }
 
   void _snack(String mensaje, Color color) {
@@ -113,7 +122,9 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
   }
 
   Future<void> _guardarPrestamo() async {
-    final nombre = _nombreController.text.trim();
+    if (_isLoading) return;
+
+    final nombre = _nombreController.text.replaceAll(RegExp(r'\s+'), ' ').trim();
     final telefono = _telefonoController.text.trim();
     final direccion = _direccionController.text.trim();
 
@@ -188,7 +199,7 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
 
     final cobradorIdFinal = _esAdmin ? _cobradorSeleccionadoId : _userId;
 
-    final confirmar = await showDialog(
+    final confirmar = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
@@ -210,6 +221,11 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
             ),
             if (_esAdmin && _cobradorSeleccionadoNombre != null)
               _confirmFila('Cobrador', _cobradorSeleccionadoNombre!),
+            if (!_esAdmin)
+              const Text(
+                'Este préstamo se asignará automáticamente a tu usuario.',
+                style: TextStyle(color: Colors.grey, fontSize: 12),
+              ),
             if (_rutaSeleccionadaNombre != null)
               _confirmFila('Ruta', _rutaSeleccionadaNombre!),
           ],
@@ -238,25 +254,35 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
 
     setState(() => _isLoading = true);
 
-    final token = await _getToken();
     try {
+      final token = await _getToken();
+
+      if (token == null || token.isEmpty) {
+        if (!mounted) return;
+        setState(() => _isLoading = false);
+        _snack('Sesión expirada. Inicia sesión nuevamente', Colors.red);
+        return;
+      }
+
+      final body = {
+        'clientenombre': nombre,
+        'clientetelefono': telefono,
+        'clientedireccion': direccion,
+        'montoprestado': _monto,
+        'montototal': _totalPagar,
+        'diasplazo': _diasPlazo,
+        'cobradorid': cobradorIdFinal,
+        'rutaid': _rutaSeleccionadaId,
+        'modointeres': 'manual',
+      };
+
       final response = await http.post(
         Uri.parse('${Constants.apiUrl}/api/loans'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
         },
-        body: jsonEncode({
-          'cliente_nombre': nombre,
-          'cliente_telefono': telefono,
-          'cliente_direccion': direccion,
-          'monto_prestado': _monto,
-          'monto_total': _totalPagar,
-          'dias_plazo': _diasPlazo,
-          'cobrador_id': cobradorIdFinal,
-          'ruta_id': _rutaSeleccionadaId,
-          'modo_interes': 'manual',
-        }),
+        body: jsonEncode(body),
       );
 
       if (!mounted) return;
@@ -266,8 +292,11 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
         _snack('✅ Préstamo creado exitosamente', Colors.green);
         Navigator.pop(context, true);
       } else {
-        final decoded = jsonDecode(response.body);
-        final error = decoded['error'] ?? 'Error desconocido';
+        String error = 'Error desconocido';
+        try {
+          final decoded = jsonDecode(response.body);
+          error = decoded['error']?.toString() ?? error;
+        } catch (_) {}
         _snack('❌ $error', Colors.red);
       }
     } catch (e) {
@@ -317,8 +346,11 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
             TextField(
               controller: _nombreController,
               keyboardType: TextInputType.name,
-              // CORRECTO — incluye tildes, ñ, ü y caracteres latinos
-              inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[a-zA-ZáéíóúÁÉÍÓÚñÑüÜ\s]'))],
+              inputFormatters: [
+                FilteringTextInputFormatter.allow(
+                  RegExp(r'[a-zA-ZáéíóúÁÉÍÓÚñÑüÜ\s]'),
+                ),
+              ],
               decoration: const InputDecoration(
                 labelText: 'Nombre completo *',
                 prefixIcon: Icon(Icons.person),
@@ -345,6 +377,7 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
               ),
             ),
             const SizedBox(height: 20),
+
             if (_esAdmin) ...[
               const Text(
                 'Cobrador Responsable',
@@ -368,9 +401,11 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
                 onChanged: (value) async {
                   setState(() {
                     _cobradorSeleccionadoId = value;
-                    _cobradorSeleccionadoNombre = _cobradores.firstWhere(
-                      (c) => c['id'].toString() == value,
-                    )['nombre'];
+                    _cobradorSeleccionadoNombre = value == null
+                        ? null
+                        : _cobradores.firstWhere(
+                            (c) => c['id'].toString() == value,
+                          )['nombre'];
                     _rutaSeleccionadaId = null;
                     _rutaSeleccionadaNombre = null;
                   });
@@ -382,6 +417,31 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
               ),
               const SizedBox(height: 20),
             ],
+
+            if (!_esAdmin) ...[
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.blue[50],
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.blue[200]!),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.person_pin_circle, color: Colors.blue),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Este préstamo quedará asignado automáticamente a tu usuario.',
+                        style: TextStyle(fontSize: 13),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+            ],
+
             const Text(
               'Ruta',
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
@@ -419,12 +479,15 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
                         .toList(),
                     onChanged: (value) => setState(() {
                       _rutaSeleccionadaId = value;
-                      _rutaSeleccionadaNombre = _rutasCobrador.firstWhere(
-                        (r) => r['id'] == value,
-                      )['nombre'];
+                      _rutaSeleccionadaNombre = value == null
+                          ? null
+                          : _rutasCobrador.firstWhere(
+                              (r) => r['id'] == value,
+                            )['nombre'];
                     }),
                   ),
             const SizedBox(height: 20),
+
             const Text(
               'Monto a Prestar',
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
@@ -443,6 +506,7 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
               onChanged: _onMontoChange,
             ),
             const SizedBox(height: 20),
+
             const Text(
               'Total a Pagar',
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
@@ -461,6 +525,7 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
               onChanged: _onTotalPagarChange,
             ),
             const SizedBox(height: 20),
+
             const Text(
               'Plazo',
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
@@ -478,6 +543,7 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
               onChanged: _onDiasPlazoChange,
             ),
             const SizedBox(height: 20),
+
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -542,12 +608,15 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
                     ),
                   if (_esAdmin && _cobradorSeleccionadoNombre != null)
                     _resumenFila('Cobrador:', _cobradorSeleccionadoNombre!),
+                  if (!_esAdmin)
+                    _resumenFila('Asignado a:', 'Mi usuario'),
                   if (_rutaSeleccionadaNombre != null)
                     _resumenFila('Ruta:', _rutaSeleccionadaNombre!),
                 ],
               ),
             ),
             const SizedBox(height: 24),
+
             _isLoading
                 ? const Center(child: CircularProgressIndicator())
                 : ElevatedButton(
@@ -603,7 +672,13 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text('$label:', style: const TextStyle(color: Colors.grey)),
-          Text(valor, style: const TextStyle(fontWeight: FontWeight.bold)),
+          Flexible(
+            child: Text(
+              valor,
+              textAlign: TextAlign.right,
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
         ],
       ),
     );
