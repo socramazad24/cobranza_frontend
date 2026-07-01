@@ -1,8 +1,9 @@
-// lib/screens/reportes_screen.dart
+import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:fl_chart/fl_chart.dart';
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../providers/app_refresh_provider.dart';
 import '../services/report_service.dart';
 
 class ReportesScreen extends StatefulWidget {
@@ -14,14 +15,16 @@ class ReportesScreen extends StatefulWidget {
 
 class _ReportesScreenState extends State<ReportesScreen>
     with AutomaticKeepAliveClientMixin {
+  final ReportService reportService = ReportService();
 
-  final ReportService _reportService = ReportService();
+  Map<String, dynamic>? resumen;
+  Map<String, dynamic>? resumenGastos;
+  bool isLoading = false;
+  bool esAdmin = false;
 
-  Map<String, dynamic>? _resumen;
-  Map<String, dynamic>? _resumenGastos;
-  bool _isLoading   = false;
-  bool _esAdmin     = false;
-  bool _dataCargada = false;
+  RealtimeChannel? _channel;
+  Timer? _debounce;
+  int _lastDashboardTick = -1;
 
   @override
   bool get wantKeepAlive => true;
@@ -29,478 +32,273 @@ class _ReportesScreenState extends State<ReportesScreen>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await cargarDatos();
+      _initRealtime();
+    });
   }
 
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (!_dataCargada) {
-      _dataCargada = true;
-      _cargarDatos();
-    }
+  void _initRealtime() {
+    final supabase = Supabase.instance.client;
+
+    _channel = supabase.channel('dashboard-live')
+      ..onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public',
+        table: 'prestamos',
+        callback: (_) => _scheduleReload(),
+      )
+      ..onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public',
+        table: 'pagos',
+        callback: (_) => _scheduleReload(),
+      )
+      ..onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public',
+        table: 'gastos',
+        callback: (_) => _scheduleReload(),
+      )
+      ..onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public',
+        table: 'caja_diaria',
+        callback: (_) => _scheduleReload(),
+      )
+      ..subscribe();
   }
 
-  Future<void> _cargarDatos() async {
+  void _scheduleReload() {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 700), () async {
+      if (!mounted) return;
+      await cargarDatos(silent: true);
+    });
+  }
+
+  Future<void> cargarDatos({bool silent = false}) async {
     if (!mounted) return;
-    setState(() => _isLoading = true);
+    if (!silent) {
+      setState(() => isLoading = true);
+    }
 
     try {
-      final supabase = Supabase.instance.client;
-      final userId   = supabase.auth.currentUser?.id;
+      final prefs = await SharedPreferences.getInstance();
+      final rol = (prefs.getString('user_rol') ?? 'cobrador').trim().toLowerCase();
+      esAdmin = rol == 'admin';
 
-      String rol;
-
-      if (userId != null) {
-        final userData = await supabase
-            .from('usuarios')
-            .select('rol')
-            .eq('id', userId)
-            .single();
-
-        rol = userData['rol'] ?? 'cobrador';
-
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString('user_rol', rol);
-        await prefs.setString(
-            'jwt_token', supabase.auth.currentSession?.accessToken ?? '');
-      } else {
-        final prefs = await SharedPreferences.getInstance();
-        rol = prefs.getString('user_rol') ?? 'cobrador';
-      }
-
-      _esAdmin = rol == 'admin';
-
-      if (_esAdmin) {
+      if (esAdmin) {
         final results = await Future.wait([
-          _reportService.getResumen(),
-          _reportService.getResumenGastos(),
+          reportService.getResumen(),
+          reportService.getResumenGastos(),
         ]);
+
         if (!mounted) return;
         setState(() {
-          _resumen       = results[0];
-          _resumenGastos = results[1];
-          _isLoading     = false;
+          resumen = results[0];
+          resumenGastos = results[1];
+          isLoading = false;
         });
       } else {
-        final data = await _reportService.getResumenCobrador();
+        final data = await reportService.getResumenCobrador();
         if (!mounted) return;
         setState(() {
-          _resumen   = data;
-          _isLoading = false;
+          resumen = data;
+          resumenGastos = null;
+          isLoading = false;
         });
       }
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _isLoading   = false;
-        _dataCargada = false;
-      });
+      setState(() => isLoading = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Error cargando reportes: $e'),
+          content: Text('Error cargando dashboard: $e'),
           backgroundColor: Colors.red,
         ),
       );
     }
   }
 
-  Future<void> _recargar() async {
-    setState(() {
-      _dataCargada   = false;
-      _resumen       = null;
-      _resumenGastos = null;
-    });
-    await _cargarDatos();
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final tick = context.watch<AppRefreshProvider>().dashboardTick;
+    if (_lastDashboardTick != tick) {
+      _lastDashboardTick = tick;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        cargarDatos(silent: true);
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    if (_channel != null) {
+      Supabase.instance.client.removeChannel(_channel!);
+    }
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     super.build(context);
 
-    if (_isLoading) {
+    if (isLoading && resumen == null) {
       return const Center(child: CircularProgressIndicator());
     }
 
-    if (_resumen == null) {
+    if (resumen == null) {
       return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.error_outline, size: 60, color: Colors.red),
-            const SizedBox(height: 12),
-            const Text('Error cargando datos', style: TextStyle(fontSize: 16)),
-            const SizedBox(height: 12),
-            ElevatedButton.icon(
-              onPressed: _recargar,
-              icon: const Icon(Icons.refresh),
-              label: const Text('Reintentar'),
-            ),
-          ],
+        child: ElevatedButton.icon(
+          onPressed: () => cargarDatos(),
+          icon: const Icon(Icons.refresh),
+          label: const Text('Reintentar'),
         ),
       );
     }
 
-    return Container(
-      color: const Color(0xFFE1F5FE),
-      child: RefreshIndicator(
-        onRefresh: _recargar,
-        child: SingleChildScrollView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: _esAdmin
-                ? _buildVistaAdmin()
-                : _buildVistaCobrador(),
-          ),
-        ),
+    return RefreshIndicator(
+      onRefresh: () => cargarDatos(),
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(16),
+        child: esAdmin ? _buildVistaAdmin() : _buildVistaCobrador(),
       ),
     );
   }
 
-  // ─────────────────────────────────────────
-  // VISTA ADMIN
-  // ─────────────────────────────────────────
-  List<Widget> _buildVistaAdmin() {
-    final totalGastos    = (_resumenGastos?['total_gastos']  as num?)?.toDouble() ?? 0;
-    final cantidadGastos = _resumenGastos?['cantidad_gastos'] ?? 0;
-    final totalPrestado  = (_resumen!['total_general_prestado']  as num?)?.toDouble() ?? 0;
-    final totalPendiente = (_resumen!['total_general_pendiente'] as num?)?.toDouble() ?? 0;
-    final utilidad       = totalPendiente - totalGastos;
+  Widget _buildVistaAdmin() {
+    final totalPrestado =
+        (resumen?['total_general_prestado'] as num?)?.toDouble() ?? 0;
+    final totalPendiente =
+        (resumen?['total_general_pendiente'] as num?)?.toDouble() ?? 0;
+    final totalRecaudadoHoy =
+        (resumen?['total_recaudado_hoy'] as num?)?.toDouble() ?? 0;
+    final totalGastosHoy =
+        (resumenGastos?['total_gastos'] as num?)?.toDouble() ??
+            (resumen?['total_gastos_hoy'] as num?)?.toDouble() ??
+            0;
+    final utilidadHoy =
+        (resumen?['utilidad_hoy_estimada'] as num?)?.toDouble() ??
+            (totalRecaudadoHoy - totalGastosHoy);
 
-    return [
-      const Text('Dashboard Admin',
-          style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-      const SizedBox(height: 4),
-      Text('Vista general del negocio',
-          style: TextStyle(color: Colors.grey[600], fontSize: 13)),
-      const SizedBox(height: 16),
-
-      Row(children: [
-        Expanded(child: _buildStatCard(
-          'Total Prestado', '\$${totalPrestado.toStringAsFixed(0)}',
-          Colors.blue[100]!, Icons.monetization_on, Colors.blue,
-        )),
-        const SizedBox(width: 12),
-        Expanded(child: _buildStatCard(
-          'Saldo Pendiente', '\$${totalPendiente.toStringAsFixed(0)}',
-          Colors.orange[100]!, Icons.hourglass_bottom, Colors.orange,
-        )),
-      ]),
-      const SizedBox(height: 12),
-
-      Row(children: [
-        Expanded(child: _buildStatCard(
-          'Gastos del Mes', '\$${totalGastos.toStringAsFixed(0)}',
-          Colors.red[100]!, Icons.receipt_long, Colors.red,
-        )),
-        const SizedBox(width: 12),
-        Expanded(child: _buildStatCard(
-          'Utilidad Est.', '\$${utilidad.toStringAsFixed(0)}',
-          utilidad >= 0 ? Colors.green[100]! : Colors.red[200]!,
-          Icons.trending_up,
-          utilidad >= 0 ? Colors.green : Colors.red,
-        )),
-      ]),
-      const SizedBox(height: 12),
-
-      Row(children: [
-        Expanded(child: _buildStatCard(
-          'Préstamos Activos',
-          '${_resumen!['cantidad_prestamos_activos'] ?? 0}',
-          Colors.purple[100]!, Icons.people, Colors.purple,
-        )),
-        const SizedBox(width: 12),
-        Expanded(child: _buildStatCard(
-          'Gastos Registrados', '$cantidadGastos',
-          Colors.teal[100]!, Icons.list_alt, Colors.teal,
-        )),
-      ]),
-      const SizedBox(height: 24),
-
-      const Text('Distribución por Cobrador',
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-      const SizedBox(height: 12),
-      Card(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: SizedBox(height: 200, child: _buildDonutChart()),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text(
+          'Dashboard Admin',
+          style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
         ),
-      ),
-      const SizedBox(height: 24),
-
-      if (_resumenGastos?['por_tipo'] != null) ...[
-        const Text('Gastos por Tipo',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 12),
-        _buildGastosPorTipo(),
+        const SizedBox(height: 16),
+        Wrap(
+          runSpacing: 12,
+          spacing: 12,
+          children: [
+            _statCard('Total prestado', totalPrestado.toStringAsFixed(0), Colors.blue),
+            _statCard('Saldo pendiente', totalPendiente.toStringAsFixed(0), Colors.orange),
+            _statCard('Recaudado hoy', totalRecaudadoHoy.toStringAsFixed(0), Colors.green),
+            _statCard('Gastos hoy', totalGastosHoy.toStringAsFixed(0), Colors.red),
+            _statCard(
+              'Utilidad hoy',
+              utilidadHoy.toStringAsFixed(0),
+              utilidadHoy >= 0 ? Colors.teal : Colors.red,
+            ),
+          ],
+        ),
         const SizedBox(height: 24),
+        _buildCobradorList(),
       ],
-
-      const Text('Detalle por Cobrador',
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-      const SizedBox(height: 12),
-      ..._buildCobradorList(),
-    ];
+    );
   }
 
-  // ─────────────────────────────────────────
-  // VISTA COBRADOR
-  // ─────────────────────────────────────────
-  List<Widget> _buildVistaCobrador() {
-    final totalPrestado    = (_resumen!['total_prestado']  as num?)?.toDouble() ?? 0;
-    final totalPendiente   = (_resumen!['total_pendiente'] as num?)?.toDouble() ?? 0;
-    final totalRecaudado   = (_resumen!['total_recaudado'] as num?)?.toDouble() ?? 0;
-    final prestamosActivos = _resumen!['cantidad_prestamos_activos'] ?? 0;
-    final enMora           = _resumen!['cantidad_en_mora']           ?? 0;
-    final nombre           = _resumen!['nombre']                     ?? 'Cobrador';
+  Widget _buildVistaCobrador() {
+    final totalPrestado = (resumen?['total_prestado'] as num?)?.toDouble() ?? 0;
+    final totalPendiente = (resumen?['total_pendiente'] as num?)?.toDouble() ?? 0;
+    final totalRecaudadoHoy =
+        (resumen?['total_recaudado_hoy'] as num?)?.toDouble() ?? 0;
+    final enMora = resumen?['cantidad_en_mora'] ?? 0;
 
-    return [
-      Text('Hola, $nombre 👋',
-          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-      const SizedBox(height: 4),
-      Text('Tu resumen de hoy',
-          style: TextStyle(color: Colors.grey[600], fontSize: 13)),
-      const SizedBox(height: 16),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          'Hola, ${resumen?['nombre'] ?? 'Cobrador'}',
+          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 16),
+        Wrap(
+          runSpacing: 12,
+          spacing: 12,
+          children: [
+            _statCard('Mi cartera', totalPrestado.toStringAsFixed(0), Colors.blue),
+            _statCard('Por cobrar', totalPendiente.toStringAsFixed(0), Colors.orange),
+            _statCard('Recaudado hoy', totalRecaudadoHoy.toStringAsFixed(0), Colors.green),
+            _statCard('En mora', '$enMora', Colors.red),
+          ],
+        ),
+      ],
+    );
+  }
 
-      Row(children: [
-        Expanded(child: _buildStatCard(
-          'Mi Cartera', '\$${totalPrestado.toStringAsFixed(0)}',
-          Colors.blue[100]!, Icons.account_balance_wallet, Colors.blue,
-        )),
-        const SizedBox(width: 12),
-        Expanded(child: _buildStatCard(
-          'Por Cobrar', '\$${totalPendiente.toStringAsFixed(0)}',
-          Colors.orange[100]!, Icons.pending_actions, Colors.orange,
-        )),
-      ]),
-      const SizedBox(height: 12),
-
-      Row(children: [
-        Expanded(child: _buildStatCard(
-          'Recaudado', '\$${totalRecaudado.toStringAsFixed(0)}',
-          Colors.green[100]!, Icons.check_circle, Colors.green,
-        )),
-        const SizedBox(width: 12),
-        Expanded(child: _buildStatCard(
-          'En Mora', '$enMora clientes',
-          enMora > 0 ? Colors.red[100]! : Colors.grey[200]!,
-          Icons.warning_amber,
-          enMora > 0 ? Colors.red : Colors.grey,
-        )),
-      ]),
-      const SizedBox(height: 12),
-
-      _buildStatCard(
-        'Préstamos Activos', '$prestamosActivos',
-        Colors.purple[100]!, Icons.people, Colors.purple,
-      ),
-      const SizedBox(height: 24),
-
-      const Text('Progreso de Recaudo',
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-      const SizedBox(height: 12),
-      Card(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+  Widget _statCard(String titulo, String valor, Color color) {
+    return SizedBox(
+      width: 170,
+      child: Card(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         child: Padding(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(14),
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text('Recaudado: \$${totalRecaudado.toStringAsFixed(0)}',
-                      style: const TextStyle(fontWeight: FontWeight.w600)),
-                  Text('Meta: \$${totalPrestado.toStringAsFixed(0)}',
-                      style: TextStyle(color: Colors.grey[600], fontSize: 12)),
-                ],
-              ),
-              const SizedBox(height: 8),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: LinearProgressIndicator(
-                  value: totalPrestado > 0
-                      ? (totalRecaudado / totalPrestado).clamp(0.0, 1.0)
-                      : 0,
-                  minHeight: 14,
-                  backgroundColor: Colors.grey[300],
-                  valueColor: const AlwaysStoppedAnimation<Color>(Colors.green),
-                ),
-              ),
+              Text(titulo, style: TextStyle(color: Colors.grey.shade700, fontSize: 12)),
               const SizedBox(height: 8),
               Text(
-                totalPrestado > 0
-                    ? '${((totalRecaudado / totalPrestado) * 100).toStringAsFixed(1)}% completado'
-                    : 'Sin préstamos activos',
-                style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                valor,
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: color,
+                ),
               ),
             ],
           ),
         ),
       ),
-    ];
-  }
-
-  // ─────────────────────────────────────────
-  // WIDGETS REUTILIZABLES
-  // ─────────────────────────────────────────
-  Widget _buildStatCard(String titulo, String valor, Color color,
-      IconData icono, Color iconColor) {
-    return Card(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-      color: color,
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          children: [
-            Icon(icono, color: iconColor, size: 26),
-            const SizedBox(height: 6),
-            Text(titulo,
-                style: const TextStyle(
-                    fontSize: 12, fontWeight: FontWeight.w600),
-                textAlign: TextAlign.center),
-            const SizedBox(height: 4),
-            Text(valor,
-                style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: iconColor),
-                textAlign: TextAlign.center),
-          ],
-        ),
-      ),
     );
   }
 
-  Widget _buildDonutChart() {
-    final List<Color> colores = [
-      Colors.blue, Colors.orange, Colors.green,
-      Colors.purple, Colors.red, Colors.teal,
-    ];
-    final List<dynamic> porCobrador = _resumen!['por_cobrador'] ?? [];
-
-    final validos = porCobrador
-        .where((c) => ((c['total_prestado'] as num?)?.toDouble() ?? 0) > 0)
-        .toList();
-
-    if (validos.isEmpty) {
-      return const Center(child: Text('Sin datos para el gráfico'));
+  Widget _buildCobradorList() {
+    final List<dynamic> porCobrador = resumen?['por_cobrador'] ?? [];
+    if (porCobrador.isEmpty) {
+      return const Text('No hay cobradores con datos.');
     }
 
-    return PieChart(
-      PieChartData(
-        sectionsSpace: 3,
-        centerSpaceRadius: 40,
-        sections: validos.asMap().entries.map((entry) {
-          final i        = entry.key;
-          final cobrador = entry.value;
-          final total    = (cobrador['total_prestado'] as num?)?.toDouble() ?? 0;
-          final nombre   = cobrador['nombre']?.toString() ?? 'N/A';
-          return PieChartSectionData(
-            color: colores[i % colores.length],
-            value: total,
-            title: nombre.split(' ')[0],
-            radius: 50,
-            titleStyle: const TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.bold,
-                color: Colors.white),
-          );
-        }).toList(),
-      ),
-    );
-  }
-
-  Widget _buildGastosPorTipo() {
-    final List<dynamic> porTipo = _resumenGastos!['por_tipo'] ?? [];
-    final List<Color> colores = [
-      Colors.red, Colors.orange, Colors.purple,
-      Colors.teal, Colors.brown,
-    ];
-
-    return Card(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: porTipo.asMap().entries.map((entry) {
-            final i     = entry.key;
-            final tipo  = entry.value;
-            final monto = (tipo['total'] as num?)?.toDouble() ?? 0;
-            final label = tipo['tipo_gasto']?.toString() ?? 'Sin tipo';
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: Row(
-                children: [
-                  CircleAvatar(
-                    radius: 16,
-                    backgroundColor: colores[i % colores.length],
-                    child: Text(
-                      label.isNotEmpty ? label[0].toUpperCase() : '?',
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(child: Text(label)),
-                  Text('\$${monto.toStringAsFixed(0)}',
-                      style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: colores[i % colores.length])),
-                ],
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Detalle por cobrador',
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 12),
+        ...porCobrador.map((c) {
+          return Card(
+            child: ListTile(
+              title: Text(c['nombre'] ?? 'Sin nombre'),
+              subtitle: Text(
+                'Préstamos: ${c['cantidad_prestamos'] ?? 0} • Recaudado hoy: ${((c['total_recaudado_hoy'] as num?)?.toDouble() ?? 0).toStringAsFixed(0)}',
               ),
-            );
-          }).toList(),
-        ),
-      ),
-    );
-  }
-
-  List<Widget> _buildCobradorList() {
-    final List<Color> colores = [
-      Colors.blue, Colors.orange, Colors.green,
-      Colors.purple, Colors.red,
-    ];
-    final List<dynamic> porCobrador = _resumen!['por_cobrador'] ?? [];
-
-    return porCobrador.asMap().entries.map((entry) {
-      final i        = entry.key;
-      final cobrador = entry.value;
-      final nombre   = cobrador['nombre']?.toString()                   ?? 'Sin nombre';
-      final cantidad = cobrador['cantidad_prestamos']                    ?? 0;
-      final prestado = (cobrador['total_prestado'] as num?)?.toDouble() ?? 0;
-
-      return Card(
-        margin: const EdgeInsets.only(bottom: 10),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-        child: ListTile(
-          leading: CircleAvatar(
-            backgroundColor: colores[i % colores.length],
-            child: Text(
-              nombre.isNotEmpty ? nombre[0].toUpperCase() : '?',
-              style: const TextStyle(
-                  color: Colors.white, fontWeight: FontWeight.bold),
+              trailing: Text(
+                ((c['total_pendiente'] as num?)?.toDouble() ?? 0).toStringAsFixed(0),
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
             ),
-          ),
-          title: Text(nombre,
-              style: const TextStyle(fontWeight: FontWeight.bold)),
-          subtitle: Text('$cantidad préstamos activos'),
-          trailing: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text('\$${prestado.toStringAsFixed(0)}',
-                  style: const TextStyle(
-                      fontWeight: FontWeight.bold, color: Colors.green)),
-              const Text('prestado',
-                  style: TextStyle(fontSize: 11, color: Colors.grey)),
-            ],
-          ),
-        ),
-      );
-    }).toList();
+          );
+        }),
+      ],
+    );
   }
 }

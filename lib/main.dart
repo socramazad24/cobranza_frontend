@@ -4,10 +4,10 @@ import 'package:frontend_flutter/screens/main_layout.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-
 import 'utils/constants.dart';
 import 'utils/http_client.dart';
 import 'providers/auth_provider.dart';
+import 'providers/app_refresh_provider.dart';
 import 'screens/login_screen.dart';
 import 'widgets/network_aware_widget.dart';
 
@@ -23,29 +23,31 @@ Future<void> main() async {
     MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => AuthProvider()),
+        ChangeNotifierProvider(create: (_) => AppRefreshProvider()),
       ],
       child: const MyApp(),
     ),
   );
 }
 
-// ✅ Verifica sesión activa y sincroniza SharedPrefs
-Future<bool> _checkSession() async {
+// Verifica sesión activa y sincroniza SharedPrefs
+Future<bool> checkSession() async {
   final supabase = Supabase.instance.client;
-  final session  = supabase.auth.currentSession;
+  final session = supabase.auth.currentSession;
 
   if (session == null) return false;
 
   try {
     // Refresca si expira en menos de 60s
-    final parts   = session.accessToken.split('.');
+    final parts = session.accessToken.split('.');
     final payload = jsonDecode(
       utf8.decode(base64Url.decode(base64Url.normalize(parts[1]))),
     );
-    final exp   = payload['exp'] as int;
+    final exp = payload['exp'] as int;
     final ahora = DateTime.now().millisecondsSinceEpoch ~/ 1000;
 
     String accessToken = session.accessToken;
+
     if (exp - ahora < 60) {
       final refreshed = await supabase.auth.refreshSession();
       if (refreshed.session == null) return false;
@@ -54,21 +56,21 @@ Future<bool> _checkSession() async {
 
     // Sincroniza rol y datos en SharedPrefs
     final userId = supabase.auth.currentUser!.id;
-    final data   = await supabase
+    final data = await supabase
         .from('usuarios')
         .select('rol, nombre')
         .eq('id', userId)
         .single();
 
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('jwt_token',   accessToken);
-    await prefs.setString('user_rol',    data['rol']    ?? 'cobrador');
+    await prefs.setString('jwt_token', accessToken);
+    await prefs.setString('user_rol', data['rol'] ?? 'cobrador');
     await prefs.setString('user_nombre', data['nombre'] ?? '');
-    await prefs.setString('user_id',     userId);
+    await prefs.setString('user_id', userId);
 
     return true;
   } catch (e) {
-    print('❌ Error en _checkSession: $e');
+    debugPrint('Error en checkSession: $e');
     return false;
   }
 }
@@ -108,9 +110,8 @@ class MyApp extends StatelessWidget {
         ),
       ),
       builder: (context, child) => NetworkAwareWidget(child: child!),
-      // ✅ Usa _checkSession en vez de AuthService().isLogged()
       home: FutureBuilder<bool>(
-        future: _checkSession(),
+        future: checkSession(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Scaffold(

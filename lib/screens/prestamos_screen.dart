@@ -1,12 +1,17 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../utils/constants.dart';
 import '../utils/http_client.dart';
 import '../services/observacion_service.dart';
 import '../services/cobrador_service.dart';
+import '../services/excel_loan_service.dart';
+import '../services/excel_export_service.dart';
+import '../providers/app_refresh_provider.dart';
 import 'nuevo_prestamo_screen.dart';
 
 class PrestamosScreen extends StatefulWidget {
@@ -19,11 +24,27 @@ class PrestamosScreen extends StatefulWidget {
 class _PrestamosScreenState extends State<PrestamosScreen> {
   List _prestamos = [];
   bool _isLoading = true;
+  bool _isImporting = false;
+  bool _isExporting = false;
+  bool _esAdmin = false;
+
+  final ExcelLoanService _excelLoanService = ExcelLoanService();
+  final ExcelExportService _excelExportService = ExcelExportService();
+
+  int _lastPrestamosTick = -1;
 
   @override
   void initState() {
     super.initState();
+    _cargarRol();
     _cargarPrestamos();
+  }
+
+  Future<void> _cargarRol() async {
+    final prefs = await SharedPreferences.getInstance();
+    final rol =
+        prefs.getString('user_rol') ?? prefs.getString('userrol') ?? 'cobrador';
+    if (mounted) setState(() => _esAdmin = rol == 'admin');
   }
 
   Future<void> _cargarPrestamos() async {
@@ -43,9 +64,183 @@ class _PrestamosScreenState extends State<PrestamosScreen> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final tick = context.watch<AppRefreshProvider>().prestamosTick;
+    if (_lastPrestamosTick != tick) {
+      _lastPrestamosTick = tick;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _cargarPrestamos();
+      });
+    }
+  }
+
+  Future<void> _importarExcel() async {
+    if (_isImporting) return;
+    setState(() => _isImporting = true);
+
+    try {
+      final file = await _excelLoanService.pickExcelFile();
+      if (file == null) {
+        setState(() => _isImporting = false);
+        return;
+      }
+
+      final prestamos = await _excelLoanService.readLoansFromExcel(file);
+
+      if (prestamos.isEmpty) {
+        _showSnack('El archivo no contiene registros válidos', Colors.orange);
+        setState(() => _isImporting = false);
+        return;
+      }
+
+      final confirmar = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+          title: const Text(
+            '¿Importar préstamos?',
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
+          content: Text(
+            'Se procesarán ${prestamos.length} registros desde el archivo Excel.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar', style: TextStyle(color: Colors.grey)),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+              child: const Text('Importar', style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      );
+
+      if (confirmar != true) {
+        setState(() => _isImporting = false);
+        return;
+      }
+
+      final result = await _excelLoanService.importarPrestamos(prestamos);
+
+      if (!mounted) return;
+
+      if (result['ok'] == true) {
+        final data = result['data'] as Map<String, dynamic>;
+        final creados = data['creados'] ?? 0;
+        final errores = (data['errores'] as List?)?.length ?? 0;
+
+        context.read<AppRefreshProvider>().refreshAll();
+        await _cargarPrestamos();
+
+        _showSnack(
+          'Importación completada. Creados: $creados, errores: $errores',
+          errores == 0 ? Colors.green : Colors.orange,
+        );
+      } else {
+        _showSnack(result['error'] ?? 'Error importando Excel', Colors.red);
+      }
+    } catch (e) {
+      _showSnack('Error importando archivo: $e', Colors.red);
+    } finally {
+      if (mounted) setState(() => _isImporting = false);
+    }
+  }
+
+  Future<void> _exportarExcel() async {
+    if (_isExporting) return;
+    setState(() => _isExporting = true);
+
+    try {
+      if (_prestamos.isEmpty) {
+        _showSnack('No hay préstamos para exportar', Colors.orange);
+        setState(() => _isExporting = false);
+        return;
+      }
+
+      final file = await _excelExportService.exportPrestamos(_prestamos);
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Archivo exportado: ${file.path.split(Platform.pathSeparator).last}'),
+          backgroundColor: Colors.green,
+          action: SnackBarAction(
+            label: 'Abrir',
+            textColor: Colors.white,
+            onPressed: () => _excelExportService.openFile(file),
+          ),
+        ),
+      );
+    } catch (e) {
+      _showSnack('Error exportando archivo: $e', Colors.red);
+    } finally {
+      if (mounted) setState(() => _isExporting = false);
+    }
+  }
+
+  void _showSnack(String mensaje, Color color) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(mensaje), backgroundColor: color),
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFFBE9E7),
+      appBar: AppBar(
+        title: const Text(
+          'Préstamos',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        backgroundColor: const Color(0xFFFBE9E7),
+        elevation: 0,
+        foregroundColor: Colors.black87,
+        actions: _esAdmin
+            ? [
+                IconButton(
+                  tooltip: 'Importar Excel',
+                  icon: _isImporting
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.upload_file),
+                  onPressed: _isImporting ? null : _importarExcel,
+                ),
+                IconButton(
+                  tooltip: 'Exportar Excel',
+                  icon: _isExporting
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.download),
+                  onPressed: _isExporting ? null : _exportarExcel,
+                ),
+                IconButton(
+                  tooltip: 'Actualizar',
+                  icon: const Icon(Icons.refresh),
+                  onPressed: _cargarPrestamos,
+                ),
+              ]
+            : [
+                IconButton(
+                  tooltip: 'Actualizar',
+                  icon: const Icon(Icons.refresh),
+                  onPressed: _cargarPrestamos,
+                ),
+              ],
+      ),
       floatingActionButton: FloatingActionButton.extended(
         heroTag: null,
         onPressed: () async {
@@ -57,6 +252,7 @@ class _PrestamosScreenState extends State<PrestamosScreen> {
           );
 
           if (resultado == true && mounted) {
+            context.read<AppRefreshProvider>().refreshAll();
             await _cargarPrestamos();
           }
         },
@@ -67,112 +263,122 @@ class _PrestamosScreenState extends State<PrestamosScreen> {
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : _prestamos.isEmpty
-              ? const Center(
-                  child: Text(
-                    'No hay préstamos activos.\nPresiona + para crear uno.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.grey, fontSize: 16),
-                  ),
-                )
-              : ListView.builder(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
-                  itemCount: _prestamos.length,
-                  itemBuilder: (context, index) {
-                    final p = _prestamos[index];
-                    final cliente = p['clientes'] ?? {};
-                    final ruta = cliente['rutas'];
-                    final cobrador =
-                        p['usuarios']?['nombre'] ?? 'Sin cobrador';
-
-                    return Card(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(15),
+      body: RefreshIndicator(
+        onRefresh: _cargarPrestamos,
+        child: _isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : _prestamos.isEmpty
+                ? ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    children: const [
+                      SizedBox(height: 120),
+                      Center(
+                        child: Text(
+                          'No hay préstamos activos.\nPresiona + para crear uno.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: Colors.grey, fontSize: 16),
+                        ),
                       ),
-                      child: ListTile(
-                        leading: CircleAvatar(
-                          backgroundColor: Colors.orange[100],
-                          child: const Icon(
-                            Icons.person,
-                            color: Colors.orange,
-                          ),
+                    ],
+                  )
+                : ListView.builder(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
+                    itemCount: _prestamos.length,
+                    itemBuilder: (context, index) {
+                      final p = _prestamos[index];
+                      final cliente = p['clientes'] ?? {};
+                      final ruta = cliente['rutas'];
+                      final cobrador =
+                          p['usuarios']?['nombre'] ?? 'Sin cobrador';
+
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(15),
                         ),
-                        title: Text(
-                          cliente['nombre'] ?? 'Sin cliente',
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        subtitle: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Saldo: \$${double.parse(p['saldo_pendiente'].toString()).toStringAsFixed(0)}',
+                        child: ListTile(
+                          leading: CircleAvatar(
+                            backgroundColor: Colors.orange[100],
+                            child: const Icon(
+                              Icons.person,
+                              color: Colors.orange,
                             ),
-                            if (ruta != null)
+                          ),
+                          title: Text(
+                            cliente['nombre'] ?? 'Sin cliente',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Saldo: \$${double.parse(p['saldo_pendiente'].toString()).toStringAsFixed(0)}',
+                              ),
+                              if (ruta != null)
+                                Row(
+                                  children: [
+                                    const Icon(
+                                      Icons.map,
+                                      size: 12,
+                                      color: Colors.blue,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      ruta['nombre'] ?? '',
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.blue,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               Row(
                                 children: [
                                   const Icon(
-                                    Icons.map,
+                                    Icons.person_outline,
                                     size: 12,
-                                    color: Colors.blue,
+                                    color: Colors.grey,
                                   ),
                                   const SizedBox(width: 4),
                                   Text(
-                                    ruta['nombre'] ?? '',
+                                    cobrador,
                                     style: const TextStyle(
                                       fontSize: 12,
-                                      color: Colors.blue,
+                                      color: Colors.grey,
                                     ),
                                   ),
                                 ],
                               ),
-                            Row(
-                              children: [
-                                const Icon(
-                                  Icons.person_outline,
-                                  size: 12,
-                                  color: Colors.grey,
-                                ),
-                                const SizedBox(width: 4),
-                                Text(
-                                  cobrador,
-                                  style: const TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.grey,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                        trailing: Text(
-                          '\$${double.parse(p['cuota_diaria'].toString()).toStringAsFixed(0)}/día',
-                          style: const TextStyle(
-                            color: Colors.green,
-                            fontWeight: FontWeight.bold,
+                            ],
                           ),
-                        ),
-                        onTap: () async {
-                          final resultado = await Navigator.push<bool>(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) =>
-                                  DetallePrestamoScreen(prestamo: p),
+                          trailing: Text(
+                            '\$${double.parse(p['cuota_diaria'].toString()).toStringAsFixed(0)}/día',
+                            style: const TextStyle(
+                              color: Colors.green,
+                              fontWeight: FontWeight.bold,
                             ),
-                          );
+                          ),
+                          onTap: () async {
+                            final resultado = await Navigator.push<bool>(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) =>
+                                    DetallePrestamoScreen(prestamo: p),
+                              ),
+                            );
 
-                          if (resultado == true && mounted) {
-                            await _cargarPrestamos();
-                          }
-                        },
-                      ),
-                    );
-                  },
-                ),
+                            if (resultado == true && mounted) {
+                              context.read<AppRefreshProvider>().refreshAll();
+                              await _cargarPrestamos();
+                            }
+                          },
+                        ),
+                      );
+                    },
+                  ),
+      ),
     );
   }
 }
@@ -515,6 +721,7 @@ class _DetallePrestamoScreenState extends State<DetallePrestamoScreen> {
         p['saldo_pendiente'] = nuevoSaldo.toString();
         p['fecha_fin'] = DateFormat('yyyy-MM-dd').format(nuevaFechaFin);
       });
+      if (mounted) context.read<AppRefreshProvider>().refreshAll();
       _showSnack('✅ Préstamo actualizado', Colors.green);
     } else {
       _showSnack(
@@ -616,6 +823,7 @@ class _DetallePrestamoScreenState extends State<DetallePrestamoScreen> {
     );
 
     if (response?.statusCode == 201 && mounted) {
+      if (mounted) context.read<AppRefreshProvider>().refreshAll();
       _showSnack('✅ Deuda renovada exitosamente', Colors.green);
       Navigator.pop(context, true);
     } else {
@@ -705,6 +913,8 @@ class _DetallePrestamoScreenState extends State<DetallePrestamoScreen> {
 
       _montoController.clear();
       await _cargarHistorial();
+
+      if (mounted) context.read<AppRefreshProvider>().refreshAll();
 
       _showSnack(
         data['estado'] == 'pagado'
@@ -838,6 +1048,10 @@ class _DetallePrestamoScreenState extends State<DetallePrestamoScreen> {
                         );
 
                         if (ctx.mounted) Navigator.pop(ctx);
+
+                        if (mounted && response?.statusCode == 200) {
+                          context.read<AppRefreshProvider>().refreshAll();
+                        }
 
                         _showSnack(
                           response?.statusCode == 200

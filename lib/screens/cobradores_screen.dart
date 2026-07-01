@@ -1,8 +1,11 @@
 // lib/screens/cobradores_screen.dart
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/cobrador_service.dart';
+import '../utils/constants.dart';
+import '../utils/http_client.dart';
 
 class CobradoresScreen extends StatefulWidget {
   const CobradoresScreen({super.key});
@@ -18,6 +21,10 @@ class _CobradoresScreenState extends State<CobradoresScreen> {
   List _rutas = [];
   bool _isLoading = true;
   bool _esAdmin = false;
+
+  final Map<String, List> _prestamosPorCobrador = {};
+  final Map<String, bool> _loadingPrestamos = {};
+  final Map<String, String?> _errorPrestamos = {};
 
   @override
   void initState() {
@@ -48,10 +55,82 @@ class _CobradoresScreenState extends State<CobradoresScreen> {
         _cobradores = results[0];
         _rutas = results[1];
         _isLoading = false;
+        _prestamosPorCobrador.clear();
+        _errorPrestamos.clear();
       });
     } else {
       if (!mounted) return;
       setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _cargarPrestamosDeCobrador(String cobradorId) async {
+    if (_prestamosPorCobrador.containsKey(cobradorId)) return;
+
+    setState(() {
+      _loadingPrestamos[cobradorId] = true;
+      _errorPrestamos[cobradorId] = null;
+    });
+
+    try {
+      final response = await ApiClient.get(
+        '${Constants.apiUrl}/api/loans/cobrador/$cobradorId',
+      );
+
+      if (!mounted) return;
+
+      if (response != null && response.statusCode == 200) {
+        final data = jsonDecode(response.body) as List;
+        setState(() {
+          _prestamosPorCobrador[cobradorId] = data;
+          _loadingPrestamos[cobradorId] = false;
+        });
+      } else {
+        setState(() {
+          _errorPrestamos[cobradorId] = 'No se pudieron cargar los préstamos';
+          _loadingPrestamos[cobradorId] = false;
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _errorPrestamos[cobradorId] = 'Error de conexión';
+        _loadingPrestamos[cobradorId] = false;
+      });
+    }
+  }
+
+  void _refrescarPrestamosDeCobrador(String cobradorId) {
+    setState(() {
+      _prestamosPorCobrador.remove(cobradorId);
+      _errorPrestamos.remove(cobradorId);
+    });
+    _cargarPrestamosDeCobrador(cobradorId);
+  }
+
+  Color _colorEstado(String estado) {
+    switch (estado) {
+      case 'mora':
+        return Colors.red;
+      case 'pagado':
+        return Colors.grey;
+      case 'renovado':
+        return Colors.blue;
+      default:
+        return Colors.green;
+    }
+  }
+
+  IconData _iconoEstado(String estado) {
+    switch (estado) {
+      case 'mora':
+        return Icons.warning_amber_rounded;
+      case 'pagado':
+        return Icons.check_circle;
+      case 'renovado':
+        return Icons.autorenew;
+      default:
+        return Icons.receipt_long;
     }
   }
 
@@ -88,6 +167,22 @@ class _CobradoresScreenState extends State<CobradoresScreen> {
 
     return Scaffold(
       backgroundColor: const Color(0xFFE8F5E9),
+      appBar: AppBar(
+        title: const Text(
+          'Cobradores',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        backgroundColor: const Color(0xFFE8F5E9),
+        elevation: 0,
+        foregroundColor: Colors.black87,
+        actions: [
+          IconButton(
+            tooltip: 'Actualizar',
+            icon: const Icon(Icons.refresh),
+            onPressed: _cargarDatos,
+          ),
+        ],
+      ),
       floatingActionButton: _esAdmin
           ? FloatingActionButton.extended(
               heroTag: null,
@@ -107,62 +202,219 @@ class _CobradoresScreenState extends State<CobradoresScreen> {
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _cobradores.isEmpty
-              ? const Center(
-                  child: Text(
-                    'No hay cobradores registrados.',
-                    style: TextStyle(color: Colors.grey),
+              ? RefreshIndicator(
+                  onRefresh: _cargarDatos,
+                  child: ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    children: const [
+                      SizedBox(height: 120),
+                      Center(
+                        child: Text(
+                          'No hay cobradores registrados.',
+                          style: TextStyle(color: Colors.grey),
+                        ),
+                      ),
+                    ],
                   ),
                 )
-              : ListView.builder(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
-                  itemCount: _cobradores.length,
-                  itemBuilder: (context, index) {
-                    final cobrador = _cobradores[index];
-                    final rutas = (cobrador['rutas'] as List?)
-                            ?.map((r) => r['nombre'].toString())
-                            .join(', ') ??
-                        'Sin rutas';
+              : RefreshIndicator(
+                  onRefresh: _cargarDatos,
+                  child: ListView.builder(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
+                    itemCount: _cobradores.length,
+                    itemBuilder: (context, index) {
+                      final cobrador = _cobradores[index];
+                      final cobradorId = cobrador['id'].toString();
+                      final rutas = (cobrador['rutas'] as List?)
+                              ?.map((r) => r['nombre'].toString())
+                              .join(', ') ??
+                          'Sin rutas';
 
-                    return Card(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(15),
-                      ),
-                      child: ListTile(
-                        leading: CircleAvatar(
-                          backgroundColor: Colors.green[200],
-                          child: Text(
-                            cobrador['nombre'].toString().isNotEmpty
-                                ? cobrador['nombre'].toString()[0].toUpperCase()
-                                : '?',
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
-                            ),
+                      final prestamos = _prestamosPorCobrador[cobradorId];
+                      final loading = _loadingPrestamos[cobradorId] == true;
+                      final error = _errorPrestamos[cobradorId];
+
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        clipBehavior: Clip.antiAlias,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(15),
+                        ),
+                        child: Theme(
+                          data: Theme.of(context).copyWith(
+                            dividerColor: Colors.transparent,
                           ),
-                        ),
-                        title: Text(
-                          cobrador['nombre'] ?? 'Sin nombre',
-                          style: const TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                        subtitle: Row(
-                          children: [
-                            const Icon(Icons.route,
-                                size: 13, color: Colors.green),
-                            const SizedBox(width: 4),
-                            Expanded(
+                          child: ExpansionTile(
+                            leading: CircleAvatar(
+                              backgroundColor: Colors.green[200],
                               child: Text(
-                                rutas,
-                                style: const TextStyle(fontSize: 12),
-                                overflow: TextOverflow.ellipsis,
+                                cobrador['nombre'].toString().isNotEmpty
+                                    ? cobrador['nombre']
+                                        .toString()[0]
+                                        .toUpperCase()
+                                    : '?',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white,
+                                ),
                               ),
                             ),
-                          ],
+                            title: Text(
+                              cobrador['nombre'] ?? 'Sin nombre',
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                            subtitle: Row(
+                              children: [
+                                const Icon(Icons.route,
+                                    size: 13, color: Colors.green),
+                                const SizedBox(width: 4),
+                                Expanded(
+                                  child: Text(
+                                    rutas,
+                                    style: const TextStyle(fontSize: 12),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            childrenPadding: const EdgeInsets.only(bottom: 8),
+                            onExpansionChanged: (expanded) {
+                              if (expanded) {
+                                _cargarPrestamosDeCobrador(cobradorId);
+                              }
+                            },
+                            children: [
+                              const Divider(height: 1),
+                              if (loading)
+                                const Padding(
+                                  padding: EdgeInsets.all(20),
+                                  child: Center(
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  ),
+                                )
+                              else if (error != null)
+                                Padding(
+                                  padding: const EdgeInsets.all(16),
+                                  child: Column(
+                                    children: [
+                                      Text(
+                                        error,
+                                        style:
+                                            const TextStyle(color: Colors.red),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      TextButton.icon(
+                                        onPressed: () =>
+                                            _refrescarPrestamosDeCobrador(
+                                                cobradorId),
+                                        icon: const Icon(Icons.refresh,
+                                            size: 16),
+                                        label: const Text('Reintentar'),
+                                      ),
+                                    ],
+                                  ),
+                                )
+                              else if (prestamos == null)
+                                const SizedBox.shrink()
+                              else if (prestamos.isEmpty)
+                                const Padding(
+                                  padding: EdgeInsets.all(16),
+                                  child: Text(
+                                    'Este cobrador no tiene préstamos.',
+                                    style: TextStyle(color: Colors.grey),
+                                  ),
+                                )
+                              else ...[
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 6,
+                                  ),
+                                  child: Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Text(
+                                        'Préstamos (${prestamos.length})',
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 13,
+                                          color: Colors.black87,
+                                        ),
+                                      ),
+                                      InkWell(
+                                        onTap: () =>
+                                            _refrescarPrestamosDeCobrador(
+                                                cobradorId),
+                                        child: const Icon(
+                                          Icons.refresh,
+                                          size: 16,
+                                          color: Colors.grey,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                ...prestamos.map((p) {
+                                  final estado =
+                                      (p['estado'] ?? 'activo').toString();
+                                  final saldo = (p['saldo_pendiente'] as num?)
+                                          ?.toDouble() ??
+                                      0;
+                                  final cuota =
+                                      (p['cuota_diaria'] as num?)?.toDouble() ??
+                                          0;
+
+                                  return ListTile(
+                                    dense: true,
+                                    leading: Icon(
+                                      _iconoEstado(estado),
+                                      color: _colorEstado(estado),
+                                      size: 20,
+                                    ),
+                                    title: Text(
+                                      p['cliente_nombre'] ?? 'Sin cliente',
+                                      style: const TextStyle(fontSize: 13),
+                                    ),
+                                    subtitle: Text(
+                                      'Ruta: ${p['ruta_nombre'] ?? 'Sin ruta'} • Estado: $estado',
+                                      style: const TextStyle(fontSize: 11),
+                                    ),
+                                    trailing: Column(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.end,
+                                      children: [
+                                        Text(
+                                          'Saldo: \$${saldo.toStringAsFixed(0)}',
+                                          style: const TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.red,
+                                          ),
+                                        ),
+                                        Text(
+                                          '\$${cuota.toStringAsFixed(0)}/día',
+                                          style: const TextStyle(
+                                            fontSize: 11,
+                                            color: Colors.green,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                }),
+                              ],
+                            ],
+                          ),
                         ),
-                        trailing: const Icon(Icons.chevron_right),
-                      ),
-                    );
-                  },
+                      );
+                    },
+                  ),
                 ),
     );
   }
@@ -308,13 +560,11 @@ void abrirFormularioNuevoCobrador(
                         final email = emailController.text.trim();
                         final password = passwordController.text.trim();
 
-                        if (nombre.isEmpty ||
-                            email.isEmpty ||
-                            password.isEmpty) {
+                        if (nombre.isEmpty || email.isEmpty || password.isEmpty) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
-                              content:
-                                  Text('Todos los campos son requeridos'),
+                              content: Text('Completa todos los campos obligatorios'),
+                              backgroundColor: Colors.red,
                             ),
                           );
                           return;
@@ -323,8 +573,8 @@ void abrirFormularioNuevoCobrador(
                         if (password.length < 6) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
-                              content:
-                                  Text('Contraseña mínimo 6 caracteres'),
+                              content: Text('La contraseña debe tener al menos 6 caracteres'),
+                              backgroundColor: Colors.red,
                             ),
                           );
                           return;
@@ -333,19 +583,8 @@ void abrirFormularioNuevoCobrador(
                         if (rutasSeleccionadas.isEmpty) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
-                              content:
-                                  Text('Selecciona al menos una ruta'),
-                            ),
-                          );
-                          return;
-                        }
-
-                        if (!RegExp(r'^[\w\.-]+@[\w\.-]+\.\w+$')
-                            .hasMatch(email)) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content:
-                                  Text('Correo electrónico inválido'),
+                              content: Text('Selecciona al menos una ruta'),
+                              backgroundColor: Colors.red,
                             ),
                           );
                           return;
@@ -353,41 +592,46 @@ void abrirFormularioNuevoCobrador(
 
                         setModalState(() => guardando = true);
 
-                        final success = await cobradorService.createCobrador(
-                          nombre,
-                          email,
-                          password,
-                          rutasSeleccionadas,
-                        );
+                        bool exito = false;
+                        try {
+                          exito = await cobradorService.createCobrador(
+                            nombre,
+                            email,
+                            password,
+                            rutasSeleccionadas,
+                          );
+                        } catch (_) {
+                          exito = false;
+                        }
 
                         setModalState(() => guardando = false);
 
-                        if (context.mounted) {
+                        if (!context.mounted) return;
+
+                        if (exito) {
                           Navigator.pop(context);
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                success
-                                    ? '✅ Cobrador creado correctamente'
-                                    : '❌ Error al crear cobrador',
+                          await onCreado();
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('✅ Cobrador creado exitosamente'),
+                                backgroundColor: Colors.green,
                               ),
-                              backgroundColor:
-                                  success ? Colors.green : Colors.red,
+                            );
+                          }
+                        } else {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('❌ Error al crear cobrador. Verifica el correo o la contraseña.'),
+                              backgroundColor: Colors.red,
                             ),
                           );
-
-                          if (success) {
-                            onCreado();
-                          }
                         }
                       },
                       icon: const Icon(Icons.save),
                       label: const Text(
-                        'Guardar Cobrador',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
+                        'Crear Cobrador',
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                       ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFFA5D6A7),

@@ -6,6 +6,7 @@ import '../utils/http_client.dart';
 
 class AdminCajaScreen extends StatefulWidget {
   const AdminCajaScreen({super.key});
+
   @override
   State<AdminCajaScreen> createState() => _AdminCajaScreenState();
 }
@@ -25,27 +26,49 @@ class _AdminCajaScreenState extends State<AdminCajaScreen> {
 
   String get fechaStr => DateFormat('yyyy-MM-dd').format(fechaSeleccionada);
 
+  double _toDouble(dynamic value) {
+    if (value == null) return 0;
+    if (value is num) return value.toDouble();
+    return double.tryParse(value.toString()) ?? 0;
+  }
+
+  double _sumarCampo(List items, String key) {
+    double total = 0;
+    for (final item in items) {
+      if (item is Map && item[key] != null) {
+        total += _toDouble(item[key]);
+      }
+    }
+    return total;
+  }
+
   Future<void> cargarResumen() async {
     if (!mounted) return;
     setState(() => isLoading = true);
+
     final res = await ApiClient.get(
       '${Constants.apiUrl}/api/caja/resumen?fecha=$fechaStr',
     );
+
     if (!mounted) return;
+
     if (res != null && res.statusCode == 200) {
       final data = jsonDecode(res.body) as Map<String, dynamic>;
+
       setState(() {
         resumen = data['resumen'] as Map<String, dynamic>?;
-        cajas = data['cajas'] ?? [];
+        cajas = (data['cajas'] as List?) ?? [];
         isLoading = false;
       });
     } else {
       setState(() => isLoading = false);
+
       String mensaje = 'No se pudo cargar el resumen de caja';
       try {
         final body = jsonDecode(res?.body ?? '{}');
         mensaje = body['error'] ?? mensaje;
       } catch (_) {}
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(mensaje), backgroundColor: Colors.red),
@@ -64,6 +87,7 @@ class _AdminCajaScreenState extends State<AdminCajaScreen> {
           ? (cajaExistente['base_entregada'] ?? 0).toString()
           : '',
     );
+
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -72,7 +96,9 @@ class _AdminCajaScreenState extends State<AdminCajaScreen> {
       ),
       builder: (ctx) => Padding(
         padding: EdgeInsets.only(
-          left: 16, right: 16, top: 24,
+          left: 16,
+          right: 16,
+          top: 24,
           bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
         ),
         child: Column(
@@ -97,6 +123,7 @@ class _AdminCajaScreenState extends State<AdminCajaScreen> {
               onPressed: () async {
                 final monto = double.tryParse(ctrl.text.trim());
                 if (monto == null || monto < 0) return;
+
                 final res = await ApiClient.post(
                   '${Constants.apiUrl}/api/caja',
                   {
@@ -105,8 +132,10 @@ class _AdminCajaScreenState extends State<AdminCajaScreen> {
                     'fecha': fechaStr,
                   },
                 );
+
                 if (ctx.mounted) Navigator.pop(ctx);
                 if (!mounted) return;
+
                 if (res != null && (res.statusCode == 200 || res.statusCode == 201)) {
                   await cargarResumen();
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -145,6 +174,7 @@ class _AdminCajaScreenState extends State<AdminCajaScreen> {
     final ctrl = TextEditingController(
       text: (caja['total_entregado'] ?? caja['total_cobrado'] ?? 0).toString(),
     );
+
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -153,7 +183,9 @@ class _AdminCajaScreenState extends State<AdminCajaScreen> {
       ),
       builder: (ctx) => Padding(
         padding: EdgeInsets.only(
-          left: 16, right: 16, top: 24,
+          left: 16,
+          right: 16,
+          top: 24,
           bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
         ),
         child: Column(
@@ -166,7 +198,7 @@ class _AdminCajaScreenState extends State<AdminCajaScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              'Cobrado en sistema: \$${fmt.format((caja['total_cobrado'] ?? 0) as num)}',
+              'Cobrado en sistema: \$${fmt.format(_toDouble(caja['total_cobrado']))}',
               style: const TextStyle(color: Colors.grey),
             ),
             const SizedBox(height: 16),
@@ -183,12 +215,15 @@ class _AdminCajaScreenState extends State<AdminCajaScreen> {
               onPressed: () async {
                 final monto = double.tryParse(ctrl.text.trim());
                 if (monto == null || monto < 0) return;
+
                 final res = await ApiClient.put(
                   '${Constants.apiUrl}/api/caja/${caja['id']}/cerrar',
                   {'total_entregado': monto},
                 );
+
                 if (ctx.mounted) Navigator.pop(ctx);
                 if (!mounted) return;
+
                 if (res != null && res.statusCode == 200) {
                   await cargarResumen();
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -223,7 +258,6 @@ class _AdminCajaScreenState extends State<AdminCajaScreen> {
     );
   }
 
-  // ── REABRIR CAJA ──────────────────────────────────────────────────────────
   Future<void> reabrirCaja(Map caja) async {
     final confirmar = await showDialog<bool>(
       context: context,
@@ -246,13 +280,16 @@ class _AdminCajaScreenState extends State<AdminCajaScreen> {
         ],
       ),
     );
+
     if (confirmar != true) return;
 
     final res = await ApiClient.put(
       '${Constants.apiUrl}/api/caja/${caja['id']}/reabrir',
       {},
     );
+
     if (!mounted) return;
+
     if (res != null && res.statusCode == 200) {
       await cargarResumen();
       ScaffoldMessenger.of(context).showSnackBar(
@@ -273,11 +310,11 @@ class _AdminCajaScreenState extends State<AdminCajaScreen> {
     }
   }
 
-  // ── EDITAR MONTO RECIBIDO (sin historial) ─────────────────────────────────
   Future<void> editarMontoRecibido(Map caja) async {
     final ctrl = TextEditingController(
       text: (caja['total_entregado'] ?? 0).toString(),
     );
+
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -286,7 +323,9 @@ class _AdminCajaScreenState extends State<AdminCajaScreen> {
       ),
       builder: (ctx) => Padding(
         padding: EdgeInsets.only(
-          left: 16, right: 16, top: 24,
+          left: 16,
+          right: 16,
+          top: 24,
           bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
         ),
         child: Column(
@@ -316,12 +355,15 @@ class _AdminCajaScreenState extends State<AdminCajaScreen> {
               onPressed: () async {
                 final monto = double.tryParse(ctrl.text.trim());
                 if (monto == null || monto < 0) return;
+
                 final res = await ApiClient.put(
                   '${Constants.apiUrl}/api/caja/${caja['id']}/monto-recibido',
                   {'total_entregado': monto},
                 );
+
                 if (ctx.mounted) Navigator.pop(ctx);
                 if (!mounted) return;
+
                 if (res != null && res.statusCode == 200) {
                   await cargarResumen();
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -365,17 +407,25 @@ class _AdminCajaScreenState extends State<AdminCajaScreen> {
     );
     if (fecha != null) {
       setState(() => fechaSeleccionada = fecha);
-      cargarResumen();
+      await cargarResumen();
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final totalBase = (resumen?['totalbaseentregada'] as num?)?.toDouble() ?? 0;
-    final totalCobrado = (resumen?['totalcobrado'] as num?)?.toDouble() ?? 0;
-    final totalEntregado = (resumen?['totalentregado'] as num?)?.toDouble() ?? 0;
-    final saldoCaja = (resumen?['saldocaja'] as num?)?.toDouble() ??
-        (totalBase + totalCobrado - totalEntregado);
+    double totalBase = 0;
+    double totalCobrado = 0;
+    double totalEntregado = 0;
+
+    for (final caja in cajas) {
+      if (caja is Map) {
+        totalBase += _toDouble(caja['base_entregada']);
+        totalCobrado += _toDouble(caja['total_cobrado']);
+        totalEntregado += _toDouble(caja['total_entregado']);
+      }
+    }
+
+    final saldoCaja = totalBase + totalCobrado - totalEntregado;
 
     return Scaffold(
       appBar: AppBar(
@@ -385,7 +435,10 @@ class _AdminCajaScreenState extends State<AdminCajaScreen> {
         ),
         backgroundColor: const Color(0xFFE3F2FD),
         actions: [
-          IconButton(onPressed: seleccionarFecha, icon: const Icon(Icons.calendar_month)),
+          IconButton(
+            onPressed: seleccionarFecha,
+            icon: const Icon(Icons.calendar_month),
+          ),
         ],
       ),
       body: isLoading
@@ -402,18 +455,33 @@ class _AdminCajaScreenState extends State<AdminCajaScreen> {
                   const SizedBox(height: 16),
                   Row(
                     children: [
-                      _statCard('Base entregada', fmt.format(totalBase),
-                          Colors.blue.shade50, Icons.account_balance_wallet, Colors.blue),
+                      _statCard(
+                        'Base entregada',
+                        fmt.format(totalBase),
+                        Colors.blue.shade50,
+                        Icons.account_balance_wallet,
+                        Colors.blue,
+                      ),
                       const SizedBox(width: 12),
-                      _statCard('Cobrado sistema', fmt.format(totalCobrado),
-                          Colors.green.shade50, Icons.payments, Colors.green),
+                      _statCard(
+                        'Cobrado sistema',
+                        fmt.format(totalCobrado),
+                        Colors.green.shade50,
+                        Icons.payments,
+                        Colors.green,
+                      ),
                     ],
                   ),
                   const SizedBox(height: 12),
                   Row(
                     children: [
-                      _statCard('Entregado físico', fmt.format(totalEntregado),
-                          Colors.purple.shade50, Icons.inventory_2, Colors.purple),
+                      _statCard(
+                        'Entregado físico',
+                        fmt.format(totalEntregado),
+                        Colors.purple.shade50,
+                        Icons.inventory_2,
+                        Colors.purple,
+                      ),
                       const SizedBox(width: 12),
                       _statCard(
                         'Saldo caja',
@@ -441,11 +509,11 @@ class _AdminCajaScreenState extends State<AdminCajaScreen> {
                       ),
                     ),
                   ...cajas.map((caja) {
-                    final base = (caja['base_entregada'] ?? 0) as num;
-                    final cobrado = (caja['total_cobrado'] ?? 0) as num;
-                    final entregado = caja['total_entregado'] as num?;
-                    final cerrada = entregado != null;
-                    final pendiente = base + cobrado - (entregado ?? 0);
+                    final base = _toDouble(caja['base_entregada']);
+                    final cobrado = _toDouble(caja['total_cobrado']);
+                    final entregado = _toDouble(caja['total_entregado']);
+                    final cerrada = caja['total_entregado'] != null;
+                    final pendiente = base + cobrado - entregado;
 
                     return Card(
                       shape: RoundedRectangleBorder(
@@ -467,13 +535,15 @@ class _AdminCajaScreenState extends State<AdminCajaScreen> {
                                   child: Text(
                                     caja['cobradornombre'] ?? 'Sin nombre',
                                     style: const TextStyle(
-                                      fontWeight: FontWeight.bold, fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 16,
                                     ),
                                   ),
                                 ),
                                 Container(
                                   padding: const EdgeInsets.symmetric(
-                                    horizontal: 10, vertical: 5,
+                                    horizontal: 10,
+                                    vertical: 5,
                                   ),
                                   decoration: BoxDecoration(
                                     color: cerrada
@@ -495,11 +565,10 @@ class _AdminCajaScreenState extends State<AdminCajaScreen> {
                               ],
                             ),
                             const SizedBox(height: 14),
-                            _filaMonto('Base entregada', base.toDouble()),
-                            _filaMonto('Cobrado en sistema', cobrado.toDouble()),
-                            _filaMonto('Entregado físicamente', entregado?.toDouble() ?? 0),
-                            _filaMonto('Pendiente por entregar', pendiente.toDouble()),
-                            // Aviso si hay pendiente después del cierre
+                            _filaMonto('Base entregada', base),
+                            _filaMonto('Cobrado en sistema', cobrado),
+                            _filaMonto('Entregado físicamente', entregado),
+                            _filaMonto('Pendiente por entregar', pendiente),
                             if (cerrada && pendiente > 0)
                               Container(
                                 margin: const EdgeInsets.only(top: 8),
@@ -511,13 +580,15 @@ class _AdminCajaScreenState extends State<AdminCajaScreen> {
                                 ),
                                 child: Row(
                                   children: [
-                                    const Icon(Icons.info_outline,
-                                        color: Colors.amber, size: 16),
+                                    const Icon(
+                                      Icons.info_outline,
+                                      color: Colors.amber,
+                                      size: 16,
+                                    ),
                                     const SizedBox(width: 8),
                                     Expanded(
                                       child: Text(
-                                        'Se cobró más dinero después del cierre. '
-                                        'Pendiente: \$${fmt.format(pendiente)}',
+                                        'Se cobró más dinero después del cierre. Pendiente: \$${fmt.format(pendiente)}',
                                         style: const TextStyle(
                                           color: Colors.amber,
                                           fontSize: 12,
@@ -528,7 +599,6 @@ class _AdminCajaScreenState extends State<AdminCajaScreen> {
                                 ),
                               ),
                             const SizedBox(height: 14),
-                            // Botones de acción
                             Row(
                               children: [
                                 Expanded(
@@ -561,13 +631,14 @@ class _AdminCajaScreenState extends State<AdminCajaScreen> {
                             const SizedBox(height: 8),
                             Row(
                               children: [
-                                // Reabrir (solo si está cerrada)
                                 if (cerrada)
                                   Expanded(
                                     child: OutlinedButton.icon(
                                       onPressed: () => reabrirCaja(caja),
-                                      icon: const Icon(Icons.lock_open,
-                                          color: Colors.orange),
+                                      icon: const Icon(
+                                        Icons.lock_open,
+                                        color: Colors.orange,
+                                      ),
                                       label: const Text(
                                         'Reabrir caja',
                                         style: TextStyle(color: Colors.orange),
@@ -578,12 +649,13 @@ class _AdminCajaScreenState extends State<AdminCajaScreen> {
                                     ),
                                   ),
                                 if (cerrada) const SizedBox(width: 8),
-                                // Editar monto recibido (siempre disponible)
                                 Expanded(
                                   child: OutlinedButton.icon(
                                     onPressed: () => editarMontoRecibido(caja),
-                                    icon: const Icon(Icons.edit_note,
-                                        color: Colors.purple),
+                                    icon: const Icon(
+                                      Icons.edit_note,
+                                      color: Colors.purple,
+                                    ),
                                     label: const Text(
                                       'Editar monto',
                                       style: TextStyle(color: Colors.purple),
@@ -623,13 +695,18 @@ class _AdminCajaScreenState extends State<AdminCajaScreen> {
   }
 
   Widget _statCard(
-    String titulo, String valor, Color bg, IconData icon, Color color,
+    String titulo,
+    String valor,
+    Color bg,
+    IconData icon,
+    Color color,
   ) {
     return Expanded(
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: bg, borderRadius: BorderRadius.circular(15),
+          color: bg,
+          borderRadius: BorderRadius.circular(15),
         ),
         child: Column(
           children: [
@@ -644,7 +721,9 @@ class _AdminCajaScreenState extends State<AdminCajaScreen> {
             Text(
               valor,
               style: TextStyle(
-                fontSize: 16, fontWeight: FontWeight.bold, color: color,
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: color,
               ),
               textAlign: TextAlign.center,
             ),
