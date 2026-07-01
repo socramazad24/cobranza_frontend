@@ -1,8 +1,12 @@
+// lib/screens/prestamos_screen.dart
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:frontend_flutter/providers/auth_provider.dart';
+import 'package:frontend_flutter/services/calendario_service.dart';
+import 'package:frontend_flutter/widgets/aviso_cobro_hoy_widget.dart';
+import 'package:frontend_flutter/widgets/calendario_pagos_widget.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -14,6 +18,35 @@ import '../services/excel_loan_service.dart';
 import '../services/excel_export_service.dart';
 import '../providers/app_refresh_provider.dart';
 import 'nuevo_prestamo_screen.dart';
+
+double _safeDouble(dynamic value, {double defaultValue = 0}) {
+  if (value == null) return defaultValue;
+  if (value is num) return value.toDouble();
+  if (value is String) return double.tryParse(value) ?? defaultValue;
+  return defaultValue;
+}
+
+int _safeInt(dynamic value, {int defaultValue = 0}) {
+  if (value == null) return defaultValue;
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  if (value is String) return int.tryParse(value) ?? defaultValue;
+  return defaultValue;
+}
+
+String _safeStr(dynamic value, {String defaultValue = ''}) {
+  if (value == null) return defaultValue;
+  return value.toString();
+}
+
+String _safeFecha(dynamic value, String formato, {String defaultValue = 'Fecha inválida'}) {
+  if (value == null) return defaultValue;
+  try {
+    return DateFormat(formato).format(DateTime.parse(value.toString()));
+  } catch (_) {
+    return value.toString();
+  }
+}
 
 class PrestamosScreen extends StatefulWidget {
   const PrestamosScreen({super.key});
@@ -42,9 +75,7 @@ class _PrestamosScreenState extends State<PrestamosScreen> {
   }
 
   Future<void> _cargarRol() async {
-    final prefs = await SharedPreferences.getInstance();
     final rol = await AuthProvider.getRol();
-
     if (mounted) setState(() => _esAdmin = rol == 'admin');
   }
 
@@ -52,16 +83,17 @@ class _PrestamosScreenState extends State<PrestamosScreen> {
     if (!mounted) return;
     setState(() => _isLoading = true);
 
-    final response =
-        await ApiClient.get('${Constants.apiUrl}/api/payments/active');
+    final response = await ApiClient.get('${Constants.apiUrl}/api/payments/active');
 
     if (response != null && response.statusCode == 200 && mounted) {
-      setState(() => _prestamos = jsonDecode(response.body));
+      try {
+        setState(() => _prestamos = jsonDecode(response.body) as List);
+      } catch (e) {
+        setState(() => _prestamos = []);
+      }
     }
 
-    if (mounted) {
-      setState(() => _isLoading = false);
-    }
+    if (mounted) setState(() => _isLoading = false);
   }
 
   @override
@@ -70,48 +102,34 @@ class _PrestamosScreenState extends State<PrestamosScreen> {
     final tick = context.watch<AppRefreshProvider>().prestamosTick;
     if (_lastPrestamosTick != tick) {
       _lastPrestamosTick = tick;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _cargarPrestamos();
-      });
+      WidgetsBinding.instance.addPostFrameCallback((_) => _cargarPrestamos());
     }
   }
 
   Future<void> _importarExcel() async {
     if (_isImporting) return;
     setState(() => _isImporting = true);
-
     try {
       final file = await _excelLoanService.pickExcelFile();
       if (file == null) {
         setState(() => _isImporting = false);
         return;
       }
-
       final prestamos = await _excelLoanService.readLoansFromExcel(file);
-
       if (prestamos.isEmpty) {
         _showSnack('El archivo no contiene registros válidos', Colors.orange);
         setState(() => _isImporting = false);
         return;
       }
-
       final confirmar = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-          title: const Text(
-            '¿Importar préstamos?',
-            style: TextStyle(fontWeight: FontWeight.bold),
-          ),
-          content: Text(
-            'Se procesarán ${prestamos.length} registros desde el archivo Excel.',
-          ),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+          title: const Text('¿Importar préstamos?',
+              style: TextStyle(fontWeight: FontWeight.bold)),
+          content: Text('Se procesarán ${prestamos.length} registros desde el archivo Excel.'),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar', style: TextStyle(color: Colors.grey)),
-            ),
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar', style: TextStyle(color: Colors.grey))),
             ElevatedButton(
               onPressed: () => Navigator.pop(ctx, true),
               style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
@@ -120,30 +138,22 @@ class _PrestamosScreenState extends State<PrestamosScreen> {
           ],
         ),
       );
-
       if (confirmar != true) {
         setState(() => _isImporting = false);
         return;
       }
-
       final result = await _excelLoanService.importarPrestamos(prestamos);
-
       if (!mounted) return;
-
       if (result['ok'] == true) {
         final data = result['data'] as Map<String, dynamic>;
         final creados = data['creados'] ?? 0;
         final errores = (data['errores'] as List?)?.length ?? 0;
-
-        context.read<AppRefreshProvider>().refreshAll();
+        if (mounted) context.read<AppRefreshProvider>().refreshAll();
         await _cargarPrestamos();
-
-        _showSnack(
-          'Importación completada. Creados: $creados, errores: $errores',
-          errores == 0 ? Colors.green : Colors.orange,
-        );
+        _showSnack('Importación completada. Creados: $creados, errores: $errores',
+            errores == 0 ? Colors.green : Colors.orange);
       } else {
-        _showSnack(result['error'] ?? 'Error importando Excel', Colors.red);
+        _showSnack(result['error']?.toString() ?? 'Error importando Excel', Colors.red);
       }
     } catch (e) {
       _showSnack('Error importando archivo: $e', Colors.red);
@@ -155,18 +165,14 @@ class _PrestamosScreenState extends State<PrestamosScreen> {
   Future<void> _exportarExcel() async {
     if (_isExporting) return;
     setState(() => _isExporting = true);
-
     try {
       if (_prestamos.isEmpty) {
         _showSnack('No hay préstamos para exportar', Colors.orange);
         setState(() => _isExporting = false);
         return;
       }
-
       final file = await _excelExportService.exportPrestamos(_prestamos);
-
       if (!mounted) return;
-
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Archivo exportado: ${file.path.split(Platform.pathSeparator).last}'),
@@ -187,9 +193,7 @@ class _PrestamosScreenState extends State<PrestamosScreen> {
 
   void _showSnack(String mensaje, Color color) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(mensaje), backgroundColor: color),
-    );
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(mensaje), backgroundColor: color));
   }
 
   @override
@@ -197,10 +201,7 @@ class _PrestamosScreenState extends State<PrestamosScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFFBE9E7),
       appBar: AppBar(
-        title: const Text(
-          'Préstamos',
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
+        title: const Text('Préstamos', style: TextStyle(fontWeight: FontWeight.bold)),
         backgroundColor: const Color(0xFFFBE9E7),
         elevation: 0,
         foregroundColor: Colors.black87,
@@ -209,37 +210,21 @@ class _PrestamosScreenState extends State<PrestamosScreen> {
                 IconButton(
                   tooltip: 'Importar Excel',
                   icon: _isImporting
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
+                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
                       : const Icon(Icons.upload_file),
                   onPressed: _isImporting ? null : _importarExcel,
                 ),
                 IconButton(
                   tooltip: 'Exportar Excel',
                   icon: _isExporting
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
+                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
                       : const Icon(Icons.download),
                   onPressed: _isExporting ? null : _exportarExcel,
                 ),
-                IconButton(
-                  tooltip: 'Actualizar',
-                  icon: const Icon(Icons.refresh),
-                  onPressed: _cargarPrestamos,
-                ),
+                IconButton(tooltip: 'Actualizar', icon: const Icon(Icons.refresh), onPressed: _cargarPrestamos),
               ]
             : [
-                IconButton(
-                  tooltip: 'Actualizar',
-                  icon: const Icon(Icons.refresh),
-                  onPressed: _cargarPrestamos,
-                ),
+                IconButton(tooltip: 'Actualizar', icon: const Icon(Icons.refresh), onPressed: _cargarPrestamos),
               ],
       ),
       floatingActionButton: FloatingActionButton.extended(
@@ -247,11 +232,8 @@ class _PrestamosScreenState extends State<PrestamosScreen> {
         onPressed: () async {
           final resultado = await Navigator.push<bool>(
             context,
-            MaterialPageRoute(
-              builder: (_) => const NuevoPrestamoScreen(),
-            ),
+            MaterialPageRoute(builder: (_) => const NuevoPrestamoScreen()),
           );
-
           if (resultado == true && mounted) {
             context.read<AppRefreshProvider>().refreshAll();
             await _cargarPrestamos();
@@ -259,10 +241,7 @@ class _PrestamosScreenState extends State<PrestamosScreen> {
         },
         backgroundColor: const Color(0xFFFFAB91),
         icon: const Icon(Icons.add),
-        label: const Text(
-          'Nuevo Préstamo',
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
+        label: const Text('Nuevo Préstamo', style: TextStyle(fontWeight: FontWeight.bold)),
       ),
       body: RefreshIndicator(
         onRefresh: _cargarPrestamos,
@@ -274,11 +253,8 @@ class _PrestamosScreenState extends State<PrestamosScreen> {
                     children: const [
                       SizedBox(height: 120),
                       Center(
-                        child: Text(
-                          'No hay préstamos activos.\nPresiona + para crear uno.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: Colors.grey, fontSize: 16),
-                        ),
+                        child: Text('No hay préstamos activos.\nPresiona + para crear uno.',
+                            textAlign: TextAlign.center, style: TextStyle(color: Colors.grey, fontSize: 16)),
                       ),
                     ],
                   )
@@ -286,90 +262,52 @@ class _PrestamosScreenState extends State<PrestamosScreen> {
                     padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
                     itemCount: _prestamos.length,
                     itemBuilder: (context, index) {
-                      final p = _prestamos[index];
-                      final cliente = p['clientes'] ?? {};
-                      final ruta = cliente['rutas'];
-                      final cobrador =
-                          p['usuarios']?['nombre'] ?? 'Sin cobrador';
+                      final p = _prestamos[index] as Map;
+                      final cliente = (p['clientes'] as Map?) ?? {};
+                      final ruta = cliente['rutas'] as Map?;
+                      final cobrador = _safeStr(p['usuarios']?['nombre'] ?? p['cobradornombre'], defaultValue: 'Sin cobrador');
+                      final saldo = _safeDouble(p['saldopendiente'] ?? p['saldo_pendiente']);
+                      final cuota = _safeDouble(p['cuota_diaria'] ?? p['cuotadiaria']);
+                      final frecuencia = _safeStr(p['frecuencia'], defaultValue: 'diario');
 
                       return Card(
                         margin: const EdgeInsets.only(bottom: 12),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(15),
-                        ),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
                         child: ListTile(
-                          leading: CircleAvatar(
-                            backgroundColor: Colors.orange[100],
-                            child: const Icon(
-                              Icons.person,
-                              color: Colors.orange,
-                            ),
-                          ),
-                          title: Text(
-                            cliente['nombre'] ?? 'Sin cliente',
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
+                          leading: CircleAvatar(backgroundColor: Colors.orange[100], child: const Icon(Icons.person, color: Colors.orange)),
+                          title: Text(_safeStr(cliente['nombre'], defaultValue: 'Sin cliente'),
+                              style: const TextStyle(fontWeight: FontWeight.bold)),
                           subtitle: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                'Saldo: \$${double.parse(p['saldo_pendiente'].toString()).toStringAsFixed(0)}',
-                              ),
+                              Text('Saldo: \$${saldo.toStringAsFixed(0)}'),
                               if (ruta != null)
-                                Row(
-                                  children: [
-                                    const Icon(
-                                      Icons.map,
-                                      size: 12,
-                                      color: Colors.blue,
-                                    ),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      ruta['nombre'] ?? '',
-                                      style: const TextStyle(
-                                        fontSize: 12,
-                                        color: Colors.blue,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              Row(
-                                children: [
-                                  const Icon(
-                                    Icons.person_outline,
-                                    size: 12,
-                                    color: Colors.grey,
-                                  ),
+                                Row(children: [
+                                  const Icon(Icons.map, size: 12, color: Colors.blue),
                                   const SizedBox(width: 4),
-                                  Text(
-                                    cobrador,
-                                    style: const TextStyle(
-                                      fontSize: 12,
-                                      color: Colors.grey,
-                                    ),
-                                  ),
-                                ],
-                              ),
+                                  Text(_safeStr(ruta['nombre']), style: const TextStyle(fontSize: 12, color: Colors.blue)),
+                                ]),
+                              Row(children: [
+                                const Icon(Icons.person_outline, size: 12, color: Colors.grey),
+                                const SizedBox(width: 4),
+                                Text(cobrador, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                              ]),
+                              if (frecuencia != 'diario')
+                                Row(children: [
+                                  const Icon(Icons.schedule, size: 12, color: Colors.purple),
+                                  const SizedBox(width: 4),
+                                  Text('Pago $frecuencia', style: const TextStyle(fontSize: 12, color: Colors.purple)),
+                                ]),
                             ],
                           ),
-                          trailing: Text(
-                            '\$${double.parse(p['cuota_diaria'].toString()).toStringAsFixed(0)}/día',
-                            style: const TextStyle(
-                              color: Colors.green,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
+                          trailing: Text('\$${cuota.toStringAsFixed(0)}/día',
+                              style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
                           onTap: () async {
+                            final prestamoCopia = Map<String, dynamic>.from(p);
                             final resultado = await Navigator.push<bool>(
                               context,
-                              MaterialPageRoute(
-                                builder: (_) =>
-                                    DetallePrestamoScreen(prestamo: p),
-                              ),
+                              MaterialPageRoute(builder: (_) => DetallePrestamoScreen(prestamo: prestamoCopia)),
                             );
-
                             if (resultado == true && mounted) {
                               context.read<AppRefreshProvider>().refreshAll();
                               await _cargarPrestamos();
@@ -384,6 +322,10 @@ class _PrestamosScreenState extends State<PrestamosScreen> {
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════
+//  DetallePrestamoScreen
+// ═══════════════════════════════════════════════════════════════════
+
 class DetallePrestamoScreen extends StatefulWidget {
   final Map prestamo;
   const DetallePrestamoScreen({super.key, required this.prestamo});
@@ -394,9 +336,20 @@ class DetallePrestamoScreen extends StatefulWidget {
 
 class _DetallePrestamoScreenState extends State<DetallePrestamoScreen> {
   List _historial = [];
-  bool _isLoading = true;
+  List _pagosProgramados = [];
+  Map<String, dynamic>? _calendario;
+
+  // 🆕 Datos del día
+  PagosHoyPrestamo? _pagosHoy;
+  bool _isLoadingHoy = false;
   bool _esAdmin = false;
+
+  bool _isLoading = true;
+  bool _isLoadingCalendario = false;
+  bool _mostrarCalendario = true;
+  bool _yaCargoInicial = false;
   final TextEditingController _montoController = TextEditingController();
+  final CalendarioService _calendarioService = CalendarioService();
 
   @override
   void initState() {
@@ -405,294 +358,235 @@ class _DetallePrestamoScreenState extends State<DetallePrestamoScreen> {
   }
 
   Future<void> _cargarDatos() async {
-    await SharedPreferences.getInstance();
+    if (_yaCargoInicial) return; // evita recargas múltiples
+    _yaCargoInicial = true;
+
     final rol = await AuthProvider.getRol();
+    if (mounted) setState(() => _esAdmin = rol == 'admin');
 
-
-    if (mounted) {
-      setState(() => _esAdmin = rol == 'admin');
-      await _cargarHistorial();
-    }
+    // Carga paralela de TODO
+    await Future.wait([
+      _cargarHistorial(),
+      _cargarCalendario(),
+      _cargarPagosHoy(),
+    ]);
   }
 
   Future<void> _cargarHistorial() async {
+    if (!mounted) return;
     setState(() => _isLoading = true);
-
-    final response = await ApiClient.get(
-      '${Constants.apiUrl}/api/payments/history/${widget.prestamo['id']}',
-    );
-
+    final response = await ApiClient.get('${Constants.apiUrl}/api/payments/history/${widget.prestamo['id']}');
     if (response != null && response.statusCode == 200 && mounted) {
-      setState(() => _historial = jsonDecode(response.body));
+      try {
+        setState(() => _historial = jsonDecode(response.body) as List);
+      } catch (_) {
+        setState(() => _historial = []);
+      }
     }
-
     if (mounted) setState(() => _isLoading = false);
   }
 
-  void _editarPrestamo() {
-    final p = widget.prestamo;
-    final fechaFinActual = DateTime.parse(p['fecha_fin']);
-    final montoActual = double.parse(p['monto_prestado'].toString());
-
-    late TextEditingController montoCtrl;
-    late TextEditingController saldoCtrl;
-    late TextEditingController diasCtrl;
-    late TextEditingController fechaCtrl;
-    DateTime nuevaFechaFin = fechaFinActual;
-    String? errorSaldo;
-    bool saldoValido = true;
-
-    montoCtrl = TextEditingController(text: montoActual.toStringAsFixed(0));
-    saldoCtrl = TextEditingController(
-      text: double.parse(p['saldo_pendiente'].toString()).toStringAsFixed(0),
-    );
-    diasCtrl = TextEditingController();
-    fechaCtrl = TextEditingController(
-      text: DateFormat('dd/MM/yyyy').format(fechaFinActual),
-    );
-
-    void actualizarValidacion() {
-      final monto = double.tryParse(montoCtrl.text) ?? 0;
-      final saldo = double.tryParse(saldoCtrl.text) ?? 0;
-      saldoValido = saldo > 0 && saldo <= monto * 1.20;
-      errorSaldo = saldoValido
-          ? null
-          : saldo > monto * 1.20
-              ? 'Máximo 20% de intereses (${(monto * 1.20).toStringAsFixed(0)})'
-              : 'Saldo debe ser > 0';
+  Future<void> _cargarCalendario() async {
+    if (!mounted) return;
+    setState(() => _isLoadingCalendario = true);
+    try {
+      final data = await _calendarioService.getCalendarioPagos(widget.prestamo['id']);
+      if (!mounted) return;
+      setState(() {
+        _calendario = data;
+        _pagosProgramados = (data['pagos_programados'] as List?) ?? [];
+      });
+    } catch (e) {
+      debugPrint('Error cargando calendario: $e');
+    } finally {
+      if (mounted) setState(() => _isLoadingCalendario = false);
     }
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(25)),
-      ),
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setStateModal) => Padding(
-          padding: EdgeInsets.only(
-            left: 16,
-            right: 16,
-            top: 24,
-            bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
-          ),
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  children: const [
-                    Icon(Icons.edit, color: Colors.deepPurple),
-                    SizedBox(width: 8),
-                    Text(
-                      'Editar Préstamo',
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
-                ),
-                Text(
-                  'Cliente: ${p['clientes']?['nombre'] ?? 'N/A'}',
-                  style: const TextStyle(color: Colors.grey),
-                ),
-                const Divider(height: 24),
-                const Text(
-                  'Monto Prestado',
-                  style: TextStyle(fontWeight: FontWeight.w600),
-                ),
-                const SizedBox(height: 6),
-                TextField(
-                  controller: montoCtrl,
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  decoration: const InputDecoration(
-                    prefixText: '\$ ',
-                    border: OutlineInputBorder(),
-                  ),
-                  onChanged: (_) {
-                    actualizarValidacion();
-                    setStateModal(() {});
-                  },
-                ),
-                const SizedBox(height: 16),
-                const Text(
-                  'Saldo Pendiente',
-                  style: TextStyle(fontWeight: FontWeight.w600),
-                ),
-                const SizedBox(height: 6),
-                TextField(
-                  controller: saldoCtrl,
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  decoration: InputDecoration(
-                    prefixText: '\$ ',
-                    border: const OutlineInputBorder(),
-                    errorText: errorSaldo,
-                    helperText: 'Máx. 120% del monto prestado',
-                    helperStyle: const TextStyle(color: Colors.grey),
-                  ),
-                  onChanged: (_) {
-                    actualizarValidacion();
-                    setStateModal(() {});
-                  },
-                ),
-                const SizedBox(height: 16),
-                const Text(
-                  'Ampliar Plazo',
-                  style: TextStyle(fontWeight: FontWeight.w600),
-                ),
-                const SizedBox(height: 6),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: diasCtrl,
-                        keyboardType: TextInputType.number,
-                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                        decoration: const InputDecoration(
-                          suffixText: 'días',
-                          border: OutlineInputBorder(),
-                        ),
-                        onChanged: (val) {
-                          final dias = int.tryParse(val) ?? 0;
-                          nuevaFechaFin = fechaFinActual.add(Duration(days: dias));
-                          fechaCtrl.text =
-                              DateFormat('dd/MM/yyyy').format(nuevaFechaFin);
-                          setStateModal(() {});
-                        },
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: GestureDetector(
-                        onTap: () async {
-                          final picked = await showDatePicker(
-                            context: ctx,
-                            initialDate: nuevaFechaFin,
-                            firstDate: DateTime.now(),
-                            lastDate: DateTime(2100),
-                          );
-                          if (picked != null) {
-                            final diff =
-                                picked.difference(fechaFinActual).inDays;
-                            nuevaFechaFin = picked;
-                            diasCtrl.text = diff > 0 ? diff.toString() : '0';
-                            fechaCtrl.text =
-                                DateFormat('dd/MM/yyyy').format(picked);
-                            setStateModal(() {});
-                          }
-                        },
-                        child: AbsorbPointer(
-                          child: TextField(
-                            controller: fechaCtrl,
-                            readOnly: true,
-                            decoration: const InputDecoration(
-                              suffixIcon: Icon(Icons.calendar_today),
-                              labelText: 'Nueva fecha fin',
-                              border: OutlineInputBorder(),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.blue.shade50,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(
-                        Icons.info_outline,
-                        color: Colors.blue,
-                        size: 16,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Actual: ${DateFormat('dd MMM yyyy').format(fechaFinActual)}',
-                        style: const TextStyle(
-                          color: Colors.blue,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 20),
-                ElevatedButton.icon(
-                  onPressed: saldoValido
-                      ? () => _guardarEdicion(
-                            montoCtrl,
-                            saldoCtrl,
-                            nuevaFechaFin,
-                          )
-                      : null,
-                  icon: const Icon(Icons.save),
-                  label: const Text(
-                    'Guardar Cambios',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.deepPurple,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
   }
 
-  Future<void> _guardarEdicion(
-    TextEditingController montoCtrl,
-    TextEditingController saldoCtrl,
-    DateTime nuevaFechaFin,
-  ) async {
-    final nuevoMonto = double.tryParse(montoCtrl.text) ?? 0;
-    final nuevoSaldo = double.tryParse(saldoCtrl.text) ?? 0;
-    final p = widget.prestamo;
+  // 🆕 Carga los pagos hechos HOY a este préstamo
+  Future<void> _cargarPagosHoy() async {
+    if (!mounted) return;
+    setState(() => _isLoadingHoy = true);
+    try {
+      final prestamoId = _safeInt(widget.prestamo['id']);
+      if (prestamoId == 0) {
+        setState(() {
+          _pagosHoy = PagosHoyPrestamo(
+            prestamoId: 0,
+            fecha: DateTime.now(),
+            totalCobradoHoy: 0,
+            cantidadPagos: 0,
+            pagos: [],
+          );
+          _isLoadingHoy = false;
+        });
+        return;
+      }
+      final data = await _calendarioService.getPagosHoyDePrestamo(prestamoId);
+      if (!mounted) return;
+      setState(() {
+        _pagosHoy = data;
+        _isLoadingHoy = false;
+      });
+    } catch (e) {
+      debugPrint('Error cargando pagos de hoy: $e');
+      if (mounted) {
+        setState(() {
+          _pagosHoy = PagosHoyPrestamo(
+            prestamoId: _safeInt(widget.prestamo['id']),
+            fecha: DateTime.now(),
+            totalCobradoHoy: 0,
+            cantidadPagos: 0,
+            pagos: [],
+          );
+          _isLoadingHoy = false;
+        });
+      }
+    }
+  }
 
-    final confirmar = await showDialog(
+  void _toggleCalendario() {
+    setState(() => _mostrarCalendario = !_mostrarCalendario);
+  }
+
+  Future<void> _registrarPago() async {
+    final prestamoId = _safeInt(widget.prestamo['id']);
+    final monto = _safeDouble(_montoController.text.trim());
+    final saldoActual = _safeDouble(
+      widget.prestamo['saldopendiente'] ?? widget.prestamo['saldo_pendiente'],
+    );
+
+    if (prestamoId == 0) {
+      _mostrarSnack('No se encontró el ID del préstamo', Colors.red);
+      return;
+    }
+    if (monto <= 0) {
+      _mostrarSnack('Monto inválido', Colors.red);
+      return;
+    }
+    if (monto > saldoActual) {
+      _mostrarSnack(
+        'El monto \$${monto.toStringAsFixed(0)} supera el saldo \$${saldoActual.toStringAsFixed(0)}',
+        Colors.red,
+      );
+      return;
+    }
+
+    final cuotaSugerida =
+        _safeDouble(_calendario?['prestamo']?['cuota_por_periodo']);
+    final clienteNombre = _safeStr(
+      widget.prestamo['clientes']?['nombre'],
+      defaultValue: 'Sin nombre',
+    );
+
+    final yaCobradoHoy = _pagosHoy?.totalCobradoHoy ?? 0;
+    final cantidadHoy = _pagosHoy?.cantidadPagos ?? 0;
+
+    // Si ya cobró hoy, mostrar advertencia antes de la confirmación normal
+    if (cantidadHoy > 0) {
+      final continuar = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.warning_amber, color: Colors.orange),
+              SizedBox(width: 8),
+              Text('⚠️ Ya cobraste hoy'),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Ya realizaste $cantidadHoy pago(s) hoy por un total de \$${yaCobradoHoy.toStringAsFixed(0)}.',
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                '¿Estás seguro de registrar OTRO pago?',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.orange,
+              ),
+              child: const Text(
+                'Sí, registrar',
+                style: TextStyle(color: Colors.white),
+              ),
+            ),
+          ],
+        ),
+      );
+
+      if (continuar != true) return;
+    }
+
+    final confirmar = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-        title: const Text(
-          '¿Confirmar cambios?',
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
+        title: const Text('¿Confirmar pago?'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _confirmRow('Monto prestado', '\$${nuevoMonto.toStringAsFixed(0)}'),
-            _confirmRow('Saldo pendiente', '\$${nuevoSaldo.toStringAsFixed(0)}'),
-            _confirmRow(
-              'Nueva fecha fin',
-              DateFormat('dd MMM yyyy').format(nuevaFechaFin),
-            ),
+            Text('Cliente: $clienteNombre'),
+            Text('Monto: \$${monto.toStringAsFixed(0)}'),
+            if (cuotaSugerida > 0 &&
+                (monto - cuotaSugerida).abs() < 1)
+              const Padding(
+                padding: EdgeInsets.only(top: 8),
+                child: Text(
+                  '✅ Coincide con la cuota del día',
+                  style: TextStyle(
+                    color: Colors.green,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+            if (yaCobradoHoy > 0)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  '⚠️ Ya cobraste \$${yaCobradoHoy.toStringAsFixed(0)} hoy a este cliente',
+                  style: const TextStyle(
+                    color: Colors.orange,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            if (monto >= saldoActual)
+              const Padding(
+                padding: EdgeInsets.only(top: 8),
+                child: Text(
+                  '🎉 Este pago completa el préstamo',
+                  style: TextStyle(
+                    color: Colors.green,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                  ),
+                ),
+              ),
           ],
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text(
-              'Cancelar',
-              style: TextStyle(color: Colors.grey),
-            ),
+            child: const Text('Cancelar'),
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.deepPurple,
+              backgroundColor: Colors.green,
             ),
             child: const Text(
               'Confirmar',
@@ -703,193 +597,7 @@ class _DetallePrestamoScreenState extends State<DetallePrestamoScreen> {
       ),
     );
 
-    if (confirmar != true || !mounted) return;
-
-    Navigator.pop(context);
-
-    final response = await ApiClient.put(
-      '${Constants.apiUrl}/api/loans/${p['id']}',
-      {
-        'monto_prestado': nuevoMonto,
-        'saldo_pendiente': nuevoSaldo,
-        'fecha_fin': DateFormat('yyyy-MM-dd').format(nuevaFechaFin),
-      },
-    );
-
-    if (response?.statusCode == 200 && mounted) {
-      setState(() {
-        p['monto_prestado'] = nuevoMonto.toString();
-        p['saldo_pendiente'] = nuevoSaldo.toString();
-        p['fecha_fin'] = DateFormat('yyyy-MM-dd').format(nuevaFechaFin);
-      });
-      if (mounted) context.read<AppRefreshProvider>().refreshAll();
-      _showSnack('✅ Préstamo actualizado', Colors.green);
-    } else {
-      _showSnack(
-        '❌ ${jsonDecode(response?.body ?? '{}')['error'] ?? 'Error desconocido'}',
-        Colors.red,
-      );
-    }
-  }
-
-  void _renovarDeuda() {
-    final diasCtrl = TextEditingController(text: '30');
-    final saldoActual =
-        double.parse(widget.prestamo['saldo_pendiente'].toString());
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(25)),
-      ),
-      builder: (ctx) => Padding(
-        padding: EdgeInsets.only(
-          left: 16,
-          right: 16,
-          top: 24,
-          bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: const [
-                Icon(Icons.refresh, color: Colors.orange),
-                SizedBox(width: 8),
-                Text(
-                  'Renovar Deuda',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Saldo actual: \$${saldoActual.toStringAsFixed(0)}',
-              style: const TextStyle(color: Colors.grey),
-            ),
-            const SizedBox(height: 4),
-            const Text(
-              'El backend actual renovará el préstamo usando el saldo pendiente y calculará el nuevo total automáticamente.',
-              style: TextStyle(color: Colors.grey),
-            ),
-            const Divider(height: 24),
-            TextField(
-              controller: diasCtrl,
-              keyboardType: TextInputType.number,
-              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              decoration: const InputDecoration(
-                labelText: 'Días de plazo',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 20),
-            ElevatedButton.icon(
-              onPressed: () => _confirmarRenovacion(diasCtrl),
-              icon: const Icon(Icons.save),
-              label: const Text(
-                'Renovar',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.orange,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Future<void> _confirmarRenovacion(
-    TextEditingController diasCtrl,
-  ) async {
-    final diasPlazo = int.tryParse(diasCtrl.text.trim()) ?? 0;
-
-    if (diasPlazo <= 0) {
-      _showSnack('❌ Días inválidos', Colors.red);
-      return;
-    }
-
-    Navigator.pop(context);
-
-    final response = await ApiClient.post(
-      '${Constants.apiUrl}/api/payments/renew',
-      {
-        'prestamo_id': widget.prestamo['id'],
-        'dias_plazo': diasPlazo,
-      },
-    );
-
-    if (response?.statusCode == 201 && mounted) {
-      if (mounted) context.read<AppRefreshProvider>().refreshAll();
-      _showSnack('✅ Deuda renovada exitosamente', Colors.green);
-      Navigator.pop(context, true);
-    } else {
-      String mensaje = '❌ Error al renovar';
-      try {
-        final data = jsonDecode(response?.body ?? '{}');
-        mensaje = data['error'] ?? mensaje;
-      } catch (_) {}
-      _showSnack(mensaje, Colors.red);
-    }
-  }
-
-  Widget _confirmRow(String label, String value) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 3),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(label, style: const TextStyle(color: Colors.grey)),
-            Text(value, style: const TextStyle(fontWeight: FontWeight.bold)),
-          ],
-        ),
-      );
-
-  void _showSnack(String mensaje, Color color) {
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(mensaje),
-          backgroundColor: color,
-          duration: const Duration(seconds: 3),
-        ),
-      );
-    }
-  }
-
-  void _registrarPago() async {
-    final prestamoId = widget.prestamo['id'];
-    final monto = double.tryParse(_montoController.text.trim()) ?? 0;
-    final saldoActual =
-        double.tryParse(widget.prestamo['saldo_pendiente'].toString()) ?? 0;
-
-    if (prestamoId == null) {
-      _showSnack('❌ No se encontró el ID del préstamo', Colors.red);
-      return;
-    }
-
-    if (monto <= 0) {
-      _showSnack('Monto inválido', Colors.red);
-      return;
-    }
-
-    if (monto > saldoActual) {
-      _showSnack(
-        'El monto \$${monto.toStringAsFixed(0)} supera el saldo pendiente de \$${saldoActual.toStringAsFixed(0)}',
-        Colors.red,
-      );
-      return;
-    }
-
-    final confirmado = await _confirmDialog(
-      '¿Confirmar pago?',
-      'Abono de \$${monto.toStringAsFixed(0)}',
-    );
-
-    if (confirmado != true) return;
+    if (confirmar != true) return;
 
     final body = {
       'prestamo_id': prestamoId,
@@ -904,253 +612,76 @@ class _DetallePrestamoScreenState extends State<DetallePrestamoScreen> {
     if (!mounted) return;
 
     if (response != null && response.statusCode == 201) {
-      final data = jsonDecode(response.body);
+      try {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
 
-      setState(() {
-        widget.prestamo['saldo_pendiente'] =
-            (data['saldorestante'] as num).toDouble();
-        widget.prestamo['estado'] = data['estado'];
-      });
+        final nuevoSaldo = _safeDouble(data['saldorestante']);
+        final nuevoEstado =
+            _safeStr(data['estado'], defaultValue: 'activo');
 
-      _montoController.clear();
-      await _cargarHistorial();
+        setState(() {
+          widget.prestamo['saldopendiente'] = nuevoSaldo;
+          widget.prestamo['saldo_pendiente'] = nuevoSaldo;
+          widget.prestamo['estado'] = nuevoEstado;
+        });
 
-      if (mounted) context.read<AppRefreshProvider>().refreshAll();
+        _montoController.clear();
+        _yaCargoInicial = false;
 
-      _showSnack(
-        data['estado'] == 'pagado'
-            ? '✅ ¡Préstamo pagado!'
-            : '✅ Pago registrado',
-        Colors.green,
-      );
+        // 🆕 Forzar recarga de los pagos de hoy
+        await _cargarPagosHoy();
 
-      if (data['estado'] == 'pagado') {
-        Navigator.pop(context, true);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                '✅ Pago registrado. Total cobrado hoy: \$${_pagosHoy?.totalCobradoHoy.toStringAsFixed(0) ?? "0"}',
+              ),
+              backgroundColor: Colors.green,
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        }
+
+        if (mounted) {
+          context.read<AppRefreshProvider>().refreshAll();
+        }
+
+        _mostrarSnack(
+          nuevoEstado == 'pagado'
+              ? '🎉 ¡Préstamo completado!'
+              : '✅ Pago registrado',
+          Colors.green,
+        );
+
+        if (nuevoEstado == 'pagado') {
+          Navigator.pop(context, true);
+        }
+      } catch (e) {
+        _mostrarSnack(
+          'Error procesando respuesta: $e',
+          Colors.red,
+        );
       }
     } else {
-      String mensaje = '❌ Error al registrar pago';
+      String mensaje = 'Error al registrar pago';
+
       try {
-        final data = jsonDecode(response?.body ?? '{}');
-        mensaje = data['error'] ?? mensaje;
+        final data =
+            jsonDecode(response?.body ?? '{}') as Map<String, dynamic>;
+        mensaje = _safeStr(
+          data['error'],
+          defaultValue: mensaje,
+        );
       } catch (_) {}
-      _showSnack(mensaje, Colors.red);
+
+      _mostrarSnack(mensaje, Colors.red);
     }
   }
 
-  Future<dynamic> _confirmDialog(String titulo, String contenido) {
-    return showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(15),
-        ),
-        title: Text(
-          titulo,
-          style: const TextStyle(fontWeight: FontWeight.bold),
-        ),
-        content: Text(contenido),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text(
-              'Cancelar',
-              style: TextStyle(color: Colors.grey),
-            ),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-            child: const Text(
-              'Confirmar',
-              style: TextStyle(color: Colors.white),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _editarRutasCobrador() async {
-    final cobradorId = widget.prestamo['cobrador_id']?.toString();
-    if (cobradorId == null) {
-      _showSnack('Sin cobrador asignado', Colors.red);
-      return;
-    }
-
-    final cobradorService = CobradorService();
-
-    final todasLasRutas = await cobradorService.getRutas();
-    final rutasActuales = await cobradorService.getRutasDeCobrador(cobradorId);
-
-    List seleccionadas =
-        rutasActuales.map((r) => int.parse(r['id'].toString())).toList();
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(25)),
-      ),
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setStateModal) => Padding(
-          padding: EdgeInsets.only(
-            left: 16,
-            right: 16,
-            top: 24,
-            bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Text(
-                'Editar Rutas',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-              ),
-              Text(
-                'Cobrador: ${widget.prestamo['usuarios']?['nombre'] ?? 'N/A'}',
-                style: const TextStyle(color: Colors.grey),
-              ),
-              const SizedBox(height: 16),
-              todasLasRutas.isEmpty
-                  ? const Text(
-                      'Sin rutas',
-                      style: TextStyle(color: Colors.grey),
-                    )
-                  : Wrap(
-                      spacing: 8,
-                      runSpacing: 4,
-                      children: todasLasRutas.map((r) {
-                        final rutaId = int.parse(r['id'].toString());
-                        return FilterChip(
-                          label: Text(r['nombre']),
-                          selected: seleccionadas.contains(rutaId),
-                          selectedColor: const Color(0xFFA5D6A7),
-                          onSelected: (v) => setStateModal(() {
-                            if (v) {
-                              if (!seleccionadas.contains(rutaId)) {
-                                seleccionadas.add(rutaId);
-                              }
-                            } else {
-                              seleccionadas.remove(rutaId);
-                            }
-                          }),
-                        );
-                      }).toList(),
-                    ),
-              const SizedBox(height: 20),
-              ElevatedButton.icon(
-                onPressed: seleccionadas.isEmpty
-                    ? null
-                    : () async {
-                        final response = await ApiClient.put(
-                          '${Constants.apiUrl}/api/rutas/cobrador/$cobradorId',
-                          {'ruta_ids': seleccionadas},
-                        );
-
-                        if (ctx.mounted) Navigator.pop(ctx);
-
-                        if (mounted && response?.statusCode == 200) {
-                          context.read<AppRefreshProvider>().refreshAll();
-                        }
-
-                        _showSnack(
-                          response?.statusCode == 200
-                              ? '✅ Rutas actualizadas'
-                              : '❌ Error',
-                          response?.statusCode == 200
-                              ? Colors.green
-                              : Colors.red,
-                        );
-                      },
-                icon: const Icon(Icons.save),
-                label: const Text(
-                  'Guardar',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF81D4FA),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  void _abrirObservacion() {
-    final ctrl = TextEditingController();
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(25)),
-      ),
-      builder: (ctx) => Padding(
-        padding: EdgeInsets.only(
-          left: 16,
-          right: 16,
-          top: 24,
-          bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text(
-              'Reportar Observación',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: ctrl,
-              maxLines: 4,
-              decoration: const InputDecoration(
-                hintText: 'Describe el error...',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 16),
-            StatefulBuilder(
-              builder: (context, setStateModal) {
-                ctrl.addListener(() {
-                  if (context.mounted) setStateModal(() {});
-                });
-
-                return ElevatedButton.icon(
-                  onPressed: ctrl.text.trim().isEmpty
-                      ? null
-                      : () async {
-                          final success =
-                              await ObservacionService().createObservacion(
-                            'prestamo',
-                            widget.prestamo['id'] as int,
-                            ctrl.text.trim(),
-                          );
-                          if (ctx.mounted) Navigator.pop(ctx);
-                          _showSnack(
-                            success ? '✅ Enviado' : '❌ Error',
-                            success ? Colors.green : Colors.red,
-                          );
-                        },
-                  icon: const Icon(Icons.send),
-                  label: const Text(
-                    'Enviar',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.orange,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
-                );
-              },
-            ),
-          ],
-        ),
-      ),
-    );
+  void _mostrarSnack(String mensaje, Color color) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(mensaje), backgroundColor: color));
   }
 
   @override
@@ -1162,217 +693,206 @@ class _DetallePrestamoScreenState extends State<DetallePrestamoScreen> {
   @override
   Widget build(BuildContext context) {
     final p = widget.prestamo;
-    final cliente = p['clientes'] ?? {};
-    final ruta = cliente['rutas'];
-    final cobradorNombre = p['usuarios']?['nombre'] ?? 'Sin cobrador';
-    final fechaInicio =
-        DateFormat('dd MMM yyyy').format(DateTime.parse(p['fecha_inicio']));
-    final fechaFin =
-        DateFormat('dd MMM yyyy').format(DateTime.parse(p['fecha_fin']));
-    final saldoPendiente = double.parse(p['saldo_pendiente'].toString());
+    final cliente = (p['clientes'] as Map?) ?? {};
+    final ruta = cliente['rutas'] as Map?;
+    final cobradorNombre = _safeStr(p['usuarios']?['nombre'] ?? p['cobradornombre'], defaultValue: 'Sin cobrador');
+    final fechaInicio = _safeFecha(p['fecha_inicio'], 'dd MMM yyyy');
+    final fechaFin = _safeFecha(p['fecha_fin'], 'dd MMM yyyy');
+    final saldoPendiente = _safeDouble(p['saldopendiente'] ?? p['saldo_pendiente']);
+    final montoPrestado = _safeDouble(p['monto_prestado'] ?? p['montoprestado']);
+    final montoTotal = _safeDouble(p['monto_total'] ?? p['montototal']);
+    final frecuencia = _safeStr(p['frecuencia'], defaultValue: 'diario');
+    final estado = _safeStr(p['estado'], defaultValue: 'activo');
+    final cuotaSugerida = _safeDouble(_calendario?['prestamo']?['cuota_por_periodo']);
 
     return Scaffold(
       backgroundColor: const Color(0xFFFBE9E7),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton.icon(
-                  onPressed: () => Navigator.pop(context),
-                  icon: const Icon(Icons.arrow_back_ios, color: Colors.black87),
-                  label: const Text(
-                    'Regresar',
-                    style: TextStyle(color: Colors.black87, fontSize: 16),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Card(
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(15),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (_esAdmin)
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          children: [
-                            TextButton.icon(
-                              onPressed: _editarPrestamo,
-                              icon: const Icon(
-                                Icons.edit,
-                                color: Colors.deepPurple,
-                                size: 18,
-                              ),
-                              label: const Text(
-                                'Editar préstamo',
-                                style: TextStyle(
-                                  color: Colors.deepPurple,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ),
-                            TextButton.icon(
-                              onPressed: _editarRutasCobrador,
-                              icon: const Icon(
-                                Icons.edit_road,
-                                color: Colors.blue,
-                                size: 18,
-                              ),
-                              label: const Text(
-                                'Rutas cobrador',
-                                style: TextStyle(
-                                  color: Colors.blue,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      const Text(
-                        'Nombre del Cliente',
-                        style: TextStyle(color: Colors.grey),
-                      ),
-                      Text(
-                        cliente['nombre'] ?? 'Sin cliente',
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      if (cliente['telefono'] != null) ...[
-                        const SizedBox(height: 4),
-                        Text(
-                          '📞 ${cliente['telefono']}',
-                          style: const TextStyle(
-                            color: Colors.grey,
-                            fontSize: 13,
+      appBar: AppBar(
+        title: const Text('Detalle del Préstamo'),
+        backgroundColor: const Color(0xFFFBE9E7),
+        elevation: 0,
+        foregroundColor: Colors.black87,
+        actions: [
+          IconButton(
+            icon: Icon(_mostrarCalendario ? Icons.list : Icons.calendar_today),
+            tooltip: _mostrarCalendario ? 'Ver historial' : 'Ver calendario',
+            onPressed: _toggleCalendario,
+          ),
+        ],
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Card del cliente
+            Card(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        CircleAvatar(
+                          backgroundColor: Colors.orange.shade100,
+                          radius: 22,
+                          child: Text(
+                            (_safeStr(cliente['nombre']).isNotEmpty)
+                                ? cliente['nombre'][0].toUpperCase()
+                                : '?',
+                            style: TextStyle(color: Colors.orange.shade800, fontWeight: FontWeight.bold, fontSize: 18),
                           ),
                         ),
-                      ],
-                      if (ruta != null) ...[
-                        const SizedBox(height: 4),
-                        Row(
-                          children: [
-                            const Icon(Icons.map, size: 14, color: Colors.blue),
-                            const SizedBox(width: 6),
-                            Text(
-                              ruta['nombre'] ?? '',
-                              style: const TextStyle(
-                                color: Colors.blue,
-                                fontSize: 13,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                      const SizedBox(height: 4),
-                      Row(
-                        children: [
-                          const Icon(
-                            Icons.person_outline,
-                            size: 14,
-                            color: Colors.grey,
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            'Cobrador: $cobradorNombre',
-                            style: const TextStyle(
-                              color: Colors.grey,
-                              fontSize: 13,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      const Text(
-                        'Monto Prestado',
-                        style: TextStyle(color: Colors.grey),
-                      ),
-                      Text(
-                        '\$${double.parse(p['monto_prestado'].toString()).toStringAsFixed(0)}',
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Column(
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text(
-                                'Fecha Inicio',
-                                style: TextStyle(color: Colors.grey),
-                              ),
-                              Text(
-                                fechaInicio,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
+                              Text(_safeStr(cliente['nombre'], defaultValue: 'Sin cliente'),
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                              if (cliente['telefono'] != null)
+                                Text('📞 ${cliente['telefono']}',
+                                    style: const TextStyle(color: Colors.grey, fontSize: 12)),
                             ],
                           ),
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            children: [
-                              const Text(
-                                'Fecha Fin',
-                                style: TextStyle(color: Colors.grey),
-                              ),
-                              Text(
-                                fechaFin,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ],
-                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    if (ruta != null)
+                      Row(children: [
+                        const Icon(Icons.map, size: 14, color: Colors.blue),
+                        const SizedBox(width: 4),
+                        Text(_safeStr(ruta['nombre']), style: const TextStyle(color: Colors.blue, fontSize: 12)),
+                        const SizedBox(width: 12),
+                        const Icon(Icons.motorcycle, size: 14, color: Colors.grey),
+                        const SizedBox(width: 4),
+                        Text(cobradorNombre, style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                      ]),
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(8)),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceAround,
+                        children: [
+                          _miniStat('Prestado', '\$${montoPrestado.toStringAsFixed(0)}', Colors.blue),
+                          _miniStat('Total', '\$${montoTotal.toStringAsFixed(0)}', Colors.purple),
+                          _miniStat('Saldo', '\$${saldoPendiente.toStringAsFixed(0)}', Colors.red),
                         ],
                       ),
-                      const SizedBox(height: 12),
-                      const Text(
-                        'Saldo Pendiente',
-                        style: TextStyle(color: Colors.grey),
-                      ),
-                      Text(
-                        '\$${saldoPendiente.toStringAsFixed(0)}',
-                        style: const TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.red,
+                    ),
+                    const SizedBox(height: 10),
+                    Row(children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: _getColorEstado(estado).withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(6),
                         ),
+                        child: Text('Estado: ${estado.toUpperCase()}',
+                            style: TextStyle(color: _getColorEstado(estado), fontSize: 11, fontWeight: FontWeight.bold)),
                       ),
-                    ],
-                  ),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(color: Colors.purple.shade50, borderRadius: BorderRadius.circular(6)),
+                        child: Text('📅 $frecuencia',
+                            style: TextStyle(color: Colors.purple.shade700, fontSize: 11, fontWeight: FontWeight.bold)),
+                      ),
+                    ]),
+                    const SizedBox(height: 8),
+                    Row(children: [
+                      const Icon(Icons.event, size: 12, color: Colors.grey),
+                      const SizedBox(width: 4),
+                      Text('$fechaInicio → $fechaFin', style: const TextStyle(color: Colors.grey, fontSize: 11)),
+                    ]),
+                  ],
                 ),
               ),
-              const SizedBox(height: 16),
-              Card(
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(15),
+            ),
+            const SizedBox(height: 16),
+
+            // 🆕 AVISO DE COBRO HOY - LO MÁS IMPORTANTE
+            if (!_isLoadingHoy && _pagosHoy != null)
+              AvisoCobroHoyWidget(
+                pagosHoy: _pagosHoy!,
+                cuotaEsperada: cuotaSugerida > 0 ? cuotaSugerida : _safeDouble(widget.prestamo['cuota_diaria'] ?? widget.prestamo['cuotadiaria']),
+              ),
+
+            // Calendario o historial
+            if (_mostrarCalendario) ...[
+              if (_isLoadingCalendario)
+                const Center(child: CircularProgressIndicator())
+              else if (_calendario != null && _pagosProgramados.isNotEmpty)
+                CalendarioPagosWidget(
+                  totalPagos: _safeInt(_calendario!['prestamo']?['total_pagos']),
+                  pagosRealizados: _safeInt(_calendario!['prestamo']?['pagos_realizados']),
+                  cuotaPorPeriodo: _safeDouble(_calendario!['prestamo']?['cuota_por_periodo']),
+                  montoTotal: _safeDouble(_calendario!['prestamo']?['monto_total']),
+                  frecuencia: frecuencia,
+                  pagosProgramados: _pagosProgramados.whereType<Map>().map<Map<String, dynamic>>((m) => m.cast<String, dynamic>()).toList(),
+                  onPagoRealizado: _registrarPago,
+                )
+              else
+                Card(
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                  child: const Padding(
+                    padding: EdgeInsets.all(20),
+                    child: Center(
+                      child: Column(children: [
+                        Icon(Icons.calendar_today, size: 50, color: Colors.grey),
+                        SizedBox(height: 8),
+                        Text('No hay calendario disponible', style: TextStyle(color: Colors.grey)),
+                        SizedBox(height: 4),
+                        Text('Este préstamo fue creado antes del sistema de frecuencias',
+                            style: TextStyle(color: Colors.grey, fontSize: 11), textAlign: TextAlign.center),
+                      ]),
+                    ),
+                  ),
                 ),
+            ] else ...[
+              const Text('Historial de Pagos', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 12),
+              _isLoading
+                  ? const Center(child: CircularProgressIndicator())
+                  : _historial.isEmpty
+                      ? Card(child: const Padding(padding: EdgeInsets.all(16), child: Center(child: Text('Sin pagos aún', style: TextStyle(color: Colors.grey)))))
+                      : Card(
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                          child: ListView.separated(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            itemCount: _historial.length,
+                            separatorBuilder: (_, __) => const Divider(height: 1),
+                            itemBuilder: (ctx, i) {
+                              final pago = _historial[i] as Map;
+                              return ListTile(
+                                leading: const Icon(Icons.check_circle, color: Colors.green),
+                                title: const Text('Abono registrado'),
+                                subtitle: Text(_safeFecha(pago['fecha_pago'], 'dd MMM yyyy – hh:mm a'),
+                                    style: const TextStyle(fontSize: 12)),
+                                trailing: Text('\$${_safeDouble(pago['monto_pagado'] ?? pago['montopagado']).toStringAsFixed(0)}',
+                                    style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 16)),
+                              );
+                            },
+                          ),
+                        ),
+            ],
+            const SizedBox(height: 16),
+
+            // Registrar pago
+            if (_mostrarCalendario)
+              Card(
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
                 child: Padding(
                   padding: const EdgeInsets.all(16),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      const Text(
-                        'Registrar Abono',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                        ),
-                      ),
+                      const Text('Registrar Abono', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                       const SizedBox(height: 12),
                       TextField(
                         controller: _montoController,
@@ -1381,9 +901,9 @@ class _DetallePrestamoScreenState extends State<DetallePrestamoScreen> {
                         decoration: InputDecoration(
                           prefixText: '\$ ',
                           hintText: 'Monto del abono',
-                          helperText:
-                              'Máx: \$${saldoPendiente.toStringAsFixed(0)}',
+                          helperText: 'Cuota del día: \$${cuotaSugerida.toStringAsFixed(0)} · Máx: \$${saldoPendiente.toStringAsFixed(0)}',
                           helperStyle: const TextStyle(color: Colors.grey),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                         ),
                       ),
                       const SizedBox(height: 12),
@@ -1393,108 +913,37 @@ class _DetallePrestamoScreenState extends State<DetallePrestamoScreen> {
                           backgroundColor: const Color(0xFF81C784),
                           padding: const EdgeInsets.symmetric(vertical: 14),
                         ),
-                        child: const Text(
-                          'Registrar Pago',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      OutlinedButton(
-                        onPressed: _renovarDeuda,
-                        style: OutlinedButton.styleFrom(
-                          side: const BorderSide(color: Colors.orange),
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                        ),
-                        child: const Text(
-                          'Renovar Deuda',
-                          style: TextStyle(
-                            color: Colors.orange,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      TextButton.icon(
-                        onPressed: _abrirObservacion,
-                        icon: const Icon(
-                          Icons.report_problem_outlined,
-                          color: Colors.orange,
-                        ),
-                        label: const Text(
-                          'Reportar error',
-                          style: TextStyle(color: Colors.orange),
-                        ),
+                        child: const Text('Registrar Pago', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                       ),
                     ],
                   ),
                 ),
               ),
-              const SizedBox(height: 16),
-              const Text(
-                'Historial de Pagos',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 12),
-              _isLoading
-                  ? const Center(child: CircularProgressIndicator())
-                  : _historial.isEmpty
-                      ? Container(
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(15),
-                          ),
-                          child: const Text(
-                            'Sin pagos aún',
-                            style: TextStyle(color: Colors.grey),
-                            textAlign: TextAlign.center,
-                          ),
-                        )
-                      : Card(
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(15),
-                          ),
-                          child: ListView.separated(
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            itemCount: _historial.length,
-                            separatorBuilder: (_, __) =>
-                                const Divider(height: 1),
-                            itemBuilder: (ctx, i) {
-                              final pago = _historial[i];
-                              return ListTile(
-                                leading: const Icon(
-                                  Icons.check_circle,
-                                  color: Colors.green,
-                                ),
-                                title: const Text('Abono registrado'),
-                                subtitle: Text(
-                                  DateFormat('dd MMM yyyy – hh:mm a').format(
-                                    DateTime.parse(
-                                      pago['fecha_pago'],
-                                    ).toLocal(),
-                                  ),
-                                  style: const TextStyle(fontSize: 12),
-                                ),
-                                trailing: Text(
-                                  '\$${double.parse(pago['monto_pagado'].toString()).toStringAsFixed(2)}',
-                                  style: const TextStyle(
-                                    color: Colors.green,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 16,
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-            ],
-          ),
+            const SizedBox(height: 80),
+          ],
         ),
       ),
     );
+  }
+
+  Widget _miniStat(String label, String valor, Color color) {
+    return Column(children: [
+      Text(label, style: const TextStyle(fontSize: 10, color: Colors.grey)),
+      const SizedBox(height: 2),
+      Text(valor, style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 13)),
+    ]);
+  }
+
+  Color _getColorEstado(String estado) {
+    switch (estado) {
+      case 'mora':
+        return Colors.red;
+      case 'pagado':
+        return Colors.green;
+      case 'renovado':
+        return Colors.blue;
+      default:
+        return Colors.orange;
+    }
   }
 }
