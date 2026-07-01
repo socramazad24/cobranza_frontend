@@ -1,4 +1,3 @@
-// lib/screens/login_screen.dart
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/auth_service.dart';
@@ -12,16 +11,15 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final TextEditingController _emailController    = TextEditingController();
-  final TextEditingController _passwordController = TextEditingController();
+  final TextEditingController emailController = TextEditingController();
+  final TextEditingController passwordController = TextEditingController();
+  bool isLoading = false;
+  bool obscurePassword = true;
+  final AuthService authService = AuthService();
 
-  bool _isLoading       = false;
-  bool _obscurePassword = true;
-  final AuthService _authService = AuthService();
-
-  void _handleLogin() async {
-    final email    = _emailController.text.trim();
-    final password = _passwordController.text.trim();
+  void handleLogin() async {
+    final email = emailController.text.trim();
+    final password = passwordController.text.trim();
 
     if (email.isEmpty || password.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -30,18 +28,18 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
 
-    setState(() => _isLoading = true);
-
-    final success = await _authService.login(email, password);
-
+    setState(() => isLoading = true);
+    final success = await authService.login(email, password);
     if (!mounted) return;
-    setState(() => _isLoading = false);
+    setState(() => isLoading = false);
 
     if (success) {
-      // ✅ Debug: confirma que token y rol se guardaron
+      // Debug: confirma que token y rol se guardaron
       final prefs = await SharedPreferences.getInstance();
-      print('🔑 Token: ${prefs.getString('jwt_token')?.substring(0, 20)}...');
-      print('👤 Rol:   ${prefs.getString('user_rol')}');
+      print('Token: ${prefs.getString('jwttoken')?.substring(0, 20)}...');
+      print('Rol: ${prefs.getString('userrol')}');
+      print('Nombre: ${prefs.getString('usernombre')}');
+      print('UserId: ${prefs.getString('userid')}');
 
       if (!mounted) return;
       Navigator.pushReplacement(
@@ -60,8 +58,8 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   void dispose() {
-    _emailController.dispose();
-    _passwordController.dispose();
+    emailController.dispose();
+    passwordController.dispose();
     super.dispose();
   }
 
@@ -81,20 +79,15 @@ class _LoginScreenState extends State<LoginScreen> {
                 child: CircleAvatar(
                   radius: 45,
                   backgroundColor: Color(0xFFB3E5FC),
-                  child: Icon(Icons.account_balance_wallet,
-                      size: 50, color: Colors.blue),
+                  child: Icon(Icons.account_balance_wallet, size: 50, color: Colors.blue),
                 ),
               ),
               const SizedBox(height: 24),
-
               // Título
               const Text(
                 'Crédito Fácil',
                 textAlign: TextAlign.center,
-                style: TextStyle(
-                    fontSize: 32,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.black87),
+                style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: Colors.black87),
               ),
               const SizedBox(height: 8),
               const Text(
@@ -105,11 +98,10 @@ class _LoginScreenState extends State<LoginScreen> {
               const SizedBox(height: 40),
 
               // Email
-              const Text('Correo electrónico',
-                  style: TextStyle(fontWeight: FontWeight.w600)),
+              const Text('Correo electrónico', style: TextStyle(fontWeight: FontWeight.w600)),
               const SizedBox(height: 8),
               TextField(
-                controller: _emailController,
+                controller: emailController,
                 keyboardType: TextInputType.emailAddress,
                 decoration: const InputDecoration(
                   hintText: 'ejemplo@correo.com',
@@ -119,43 +111,35 @@ class _LoginScreenState extends State<LoginScreen> {
               const SizedBox(height: 16),
 
               // Password
-              const Text('Contraseña',
-                  style: TextStyle(fontWeight: FontWeight.w600)),
+              const Text('Contraseña', style: TextStyle(fontWeight: FontWeight.w600)),
               const SizedBox(height: 8),
               TextField(
-                controller: _passwordController,
-                obscureText: _obscurePassword,
+                controller: passwordController,
+                obscureText: obscurePassword,
                 decoration: InputDecoration(
                   hintText: '••••••••',
                   prefixIcon: const Icon(Icons.lock_outline),
                   suffixIcon: IconButton(
-                    icon: Icon(_obscurePassword
-                        ? Icons.visibility_off
-                        : Icons.visibility),
-                    onPressed: () =>
-                        setState(() => _obscurePassword = !_obscurePassword),
+                    icon: Icon(obscurePassword ? Icons.visibility_off : Icons.visibility),
+                    onPressed: () => setState(() => obscurePassword = !obscurePassword),
                   ),
                 ),
               ),
               const SizedBox(height: 32),
 
               // Botón login
-              _isLoading
+              isLoading
                   ? const Center(child: CircularProgressIndicator())
                   : ElevatedButton(
-                      onPressed: _handleLogin,
+                      onPressed: handleLogin,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF4FC3F7),
                         padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(20)),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                       ),
                       child: const Text(
                         'Iniciar Sesión',
-                        style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white),
+                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
                       ),
                     ),
             ],

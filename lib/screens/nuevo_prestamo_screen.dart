@@ -24,6 +24,7 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
   static const double _montoMin = 100000;
   static const double _montoMax = 5000000;
   static const double _totalPagarMax = 8000000;
+  static const int _diasPlazoMin = 7;
   static const int _diasPlazoMax = 60;
 
   double _monto = 0;
@@ -31,6 +32,7 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
   int _diasPlazo = 0;
   bool _isLoading = false;
   bool _esAdmin = false;
+  bool _cargando = true;
 
   List _cobradores = [];
   String? _cobradorSeleccionadoId;
@@ -54,38 +56,62 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
   Future<void> _cargarDatos() async {
     final prefs = await SharedPreferences.getInstance();
 
+    // Lee directamente desde SharedPreferences — AuthService.login los guarda correctamente
     final rolGuardado = (prefs.getString('userrol') ?? '').trim().toLowerCase();
-    _userId = prefs.getString('userid');
+    _userId = prefs.getString('userid') ?? '';
+
+    debugPrint('═══════════════════════════════════');
+    debugPrint('NuevoPrestamoScreen._cargarDatos()');
+    debugPrint('userrol en prefs: "$rolGuardado"');
+    debugPrint('userid en prefs: "$_userId"');
+    debugPrint('═══════════════════════════════════');
 
     final esAdmin = rolGuardado == 'admin';
 
     if (!mounted) return;
     setState(() {
       _esAdmin = esAdmin;
+      _cargando = false;
+      _cobradorSeleccionadoId = null;
+      _cobradorSeleccionadoNombre = null;
+      _rutasCobrador = [];
+      _rutaSeleccionadaId = null;
+      _rutaSeleccionadaNombre = null;
     });
 
     if (_esAdmin) {
-      final cobradores = await CobradorService().getCobradores();
-      if (!mounted) return;
-      setState(() {
-        _cobradores = cobradores;
-        _rutasCobrador = [];
-        _rutaSeleccionadaId = null;
-        _rutaSeleccionadaNombre = null;
-      });
-    } else if (_userId != null) {
+      try {
+        final cobradores = await CobradorService().getCobradores();
+        if (!mounted) return;
+        setState(() {
+          _cobradores = cobradores;
+        });
+      } catch (e) {
+        _snack('Error cargando cobradores', Colors.red);
+      }
+    } else if (_userId != null && _userId!.isNotEmpty) {
       await _cargarRutasDeCobrador(_userId!);
     }
   }
 
   Future<void> _cargarRutasDeCobrador(String cobradorId) async {
-    final rutas = await CobradorService().getRutasDeCobrador(cobradorId);
-    if (!mounted) return;
-    setState(() {
-      _rutasCobrador = rutas;
-      _rutaSeleccionadaId = null;
-      _rutaSeleccionadaNombre = null;
-    });
+    try {
+      final rutas = await CobradorService().getRutasDeCobrador(cobradorId);
+      if (!mounted) return;
+      setState(() {
+        _rutasCobrador = rutas;
+        _rutaSeleccionadaId = null;
+        _rutaSeleccionadaNombre = null;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _rutasCobrador = [];
+        _rutaSeleccionadaId = null;
+        _rutaSeleccionadaNombre = null;
+      });
+      _snack('Error cargando rutas del cobrador', Colors.red);
+    }
   }
 
   Future<String?> _getToken() async {
@@ -101,24 +127,15 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
   }
 
   void _onMontoChange(String value) {
-    final parsed = double.tryParse(value);
-    setState(() {
-      _monto = parsed ?? 0;
-    });
+    setState(() => _monto = double.tryParse(value) ?? 0);
   }
 
   void _onTotalPagarChange(String value) {
-    final parsed = double.tryParse(value);
-    setState(() {
-      _totalPagar = parsed ?? 0;
-    });
+    setState(() => _totalPagar = double.tryParse(value) ?? 0);
   }
 
   void _onDiasPlazoChange(String value) {
-    final parsed = int.tryParse(value);
-    setState(() {
-      _diasPlazo = parsed ?? 0;
-    });
+    setState(() => _diasPlazo = int.tryParse(value) ?? 0);
   }
 
   Future<void> _guardarPrestamo() async {
@@ -132,17 +149,14 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
       _snack('El nombre del cliente es requerido', Colors.red);
       return;
     }
-
     if (nombre.length < 3) {
       _snack('El nombre debe tener al menos 3 caracteres', Colors.red);
       return;
     }
-
     if (telefono.isNotEmpty && (telefono.length < 7 || telefono.length > 15)) {
       _snack('El teléfono debe tener entre 7 y 15 dígitos', Colors.red);
       return;
     }
-
     if (_monto < _montoMin || _monto > _montoMax) {
       _snack(
         'El monto debe estar entre \$${_montoMin.toStringAsFixed(0)} y \$${_montoMax.toStringAsFixed(0)}',
@@ -150,25 +164,18 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
       );
       return;
     }
-
     if (_totalPagar <= 0) {
       _snack('Escribe la cantidad total a pagar', Colors.red);
       return;
     }
-
     if (_totalPagar <= _monto) {
-      _snack(
-        'La cantidad a pagar debe ser mayor que el monto prestado',
-        Colors.red,
-      );
+      _snack('La cantidad a pagar debe ser mayor que el monto prestado', Colors.red);
       return;
     }
-
-    if (_diasPlazo <= 0) {
-      _snack('Escribe el plazo en días', Colors.red);
+    if (_diasPlazo < _diasPlazoMin) {
+      _snack('El plazo mínimo es $_diasPlazoMin días', Colors.red);
       return;
     }
-
     if (_totalPagar > _totalPagarMax) {
       _snack(
         'El total a pagar no puede superar \$${(_totalPagarMax / 1000).toStringAsFixed(0)}K',
@@ -176,22 +183,18 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
       );
       return;
     }
-
     if (_diasPlazo > _diasPlazoMax) {
       _snack('El plazo máximo es $_diasPlazoMax días', Colors.red);
       return;
     }
-
     if (_esAdmin && _cobradorSeleccionadoId == null) {
       _snack('Selecciona un cobrador responsable', Colors.red);
       return;
     }
-
-    if (!_esAdmin && _userId == null) {
+    if (!_esAdmin && (_userId == null || _userId!.isEmpty)) {
       _snack('No se pudo identificar el cobrador actual', Colors.red);
       return;
     }
-
     if (_rutaSeleccionadaId == null) {
       _snack('Selecciona una ruta', Colors.red);
       return;
@@ -215,10 +218,7 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
             _confirmFila('Monto prestado', '\$${_monto.toStringAsFixed(0)}'),
             _confirmFila('Total a pagar', '\$${_totalPagar.toStringAsFixed(0)}'),
             _confirmFila('Plazo', '$_diasPlazo días'),
-            _confirmFila(
-              'Cuota diaria',
-              '\$${_cuotaDiaria.toStringAsFixed(0)}/día',
-            ),
+            _confirmFila('Cuota diaria', '\$${_cuotaDiaria.toStringAsFixed(0)}/día'),
             if (_esAdmin && _cobradorSeleccionadoNombre != null)
               _confirmFila('Cobrador', _cobradorSeleccionadoNombre!),
             if (!_esAdmin)
@@ -233,18 +233,12 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text(
-              'Cancelar',
-              style: TextStyle(color: Colors.grey),
-            ),
+            child: const Text('Cancelar', style: TextStyle(color: Colors.grey)),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.amber),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text(
-              'Crear',
-              style: TextStyle(color: Colors.black87),
-            ),
+            child: const Text('Crear', style: TextStyle(color: Colors.black87)),
           ),
         ],
       ),
@@ -256,7 +250,6 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
 
     try {
       final token = await _getToken();
-
       if (token == null || token.isEmpty) {
         if (!mounted) return;
         setState(() => _isLoading = false);
@@ -319,12 +312,16 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_cargando) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text(
-          'Nuevo Préstamo',
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
+        title: const Text('Nuevo Préstamo',
+            style: TextStyle(fontWeight: FontWeight.bold)),
         centerTitle: true,
         backgroundColor: const Color(0xFFFFF9C4),
         leading: IconButton(
@@ -338,10 +335,8 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text(
-              'Datos del Cliente',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            ),
+            const Text('Datos del Cliente',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             const SizedBox(height: 12),
             TextField(
               controller: _nombreController,
@@ -378,11 +373,10 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
             ),
             const SizedBox(height: 20),
 
+            // ── SELECTOR DE COBRADOR (solo admin) ──────────────────────
             if (_esAdmin) ...[
-              const Text(
-                'Cobrador Responsable',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-              ),
+              const Text('Cobrador Responsable',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
                 decoration: const InputDecoration(
@@ -408,8 +402,8 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
                           )['nombre'];
                     _rutaSeleccionadaId = null;
                     _rutaSeleccionadaNombre = null;
+                    _rutasCobrador = [];
                   });
-
                   if (value != null) {
                     await _cargarRutasDeCobrador(value);
                   }
@@ -418,6 +412,7 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
               const SizedBox(height: 20),
             ],
 
+            // ── AVISO COBRADOR (solo si NO es admin) ───────────────────
             if (!_esAdmin) ...[
               Container(
                 padding: const EdgeInsets.all(12),
@@ -442,10 +437,9 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
               const SizedBox(height: 20),
             ],
 
-            const Text(
-              'Ruta',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            ),
+            // ── RUTA ───────────────────────────────────────────────────
+            const Text('Ruta',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             const SizedBox(height: 12),
             _rutasCobrador.isEmpty
                 ? Container(
@@ -488,10 +482,9 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
                   ),
             const SizedBox(height: 20),
 
-            const Text(
-              'Monto a Prestar',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            ),
+            // ── MONTO ──────────────────────────────────────────────────
+            const Text('Monto a Prestar',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             const SizedBox(height: 12),
             TextField(
               controller: _montoController,
@@ -507,10 +500,9 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
             ),
             const SizedBox(height: 20),
 
-            const Text(
-              'Total a Pagar',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            ),
+            // ── TOTAL A PAGAR ──────────────────────────────────────────
+            const Text('Total a Pagar',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             const SizedBox(height: 12),
             TextField(
               controller: _totalPagarController,
@@ -526,10 +518,9 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
             ),
             const SizedBox(height: 20),
 
-            const Text(
-              'Plazo',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            ),
+            // ── PLAZO ──────────────────────────────────────────────────
+            const Text('Plazo',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             const SizedBox(height: 12),
             TextField(
               controller: _diasPlazoController,
@@ -537,13 +528,14 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
               inputFormatters: [FilteringTextInputFormatter.digitsOnly],
               decoration: InputDecoration(
                 labelText: 'Días de plazo *',
-                hintText: 'Máx: $_diasPlazoMax',
+                hintText: 'Mín: $_diasPlazoMin | Máx: $_diasPlazoMax',
                 prefixIcon: const Icon(Icons.calendar_today),
               ),
               onChanged: _onDiasPlazoChange,
             ),
             const SizedBox(height: 20),
 
+            // ── RESUMEN ────────────────────────────────────────────────
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -553,33 +545,25 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
               ),
               child: Column(
                 children: [
-                  const Text(
-                    'Resumen del Préstamo',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                    ),
-                  ),
+                  const Text('Resumen del Préstamo',
+                      style:
+                          TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                   const Divider(),
+                  _resumenFila('Capital prestado:',
+                      '\$${_monto.toStringAsFixed(0)}'),
+                  _resumenFila('Total a pagar:',
+                      '\$${_totalPagar.toStringAsFixed(0)}',
+                      bold: true),
                   _resumenFila(
-                    'Capital prestado:',
-                    '\$${_monto.toStringAsFixed(0)}',
-                  ),
-                  _resumenFila(
-                    'Total a pagar:',
-                    '\$${_totalPagar.toStringAsFixed(0)}',
-                    bold: true,
-                  ),
-                  _resumenFila(
-                    'Cuota diaria:',
-                    '\$${_cuotaDiaria.toStringAsFixed(0)}/día',
-                    bold: true,
-                    color: Colors.green,
-                  ),
+                      'Cuota diaria:',
+                      '\$${_cuotaDiaria.toStringAsFixed(0)}/día',
+                      bold: true,
+                      color: Colors.green),
                   _resumenFila('Plazo:', '$_diasPlazo días'),
                   if (_monto > _montoMax ||
                       _totalPagar > _totalPagarMax ||
-                      _diasPlazo > _diasPlazoMax)
+                      _diasPlazo > _diasPlazoMax ||
+                      (_diasPlazo > 0 && _diasPlazo < _diasPlazoMin))
                     Padding(
                       padding: const EdgeInsets.only(top: 8),
                       child: Container(
@@ -595,11 +579,9 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
                             SizedBox(width: 4),
                             Expanded(
                               child: Text(
-                                '⚠️ Algunos valores exceden los límites máximos',
-                                style: TextStyle(
-                                  color: Colors.red,
-                                  fontSize: 12,
-                                ),
+                                '⚠️ Algunos valores no cumplen las reglas permitidas',
+                                style:
+                                    TextStyle(color: Colors.red, fontSize: 12),
                               ),
                             ),
                           ],
@@ -608,8 +590,7 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
                     ),
                   if (_esAdmin && _cobradorSeleccionadoNombre != null)
                     _resumenFila('Cobrador:', _cobradorSeleccionadoNombre!),
-                  if (!_esAdmin)
-                    _resumenFila('Asignado a:', 'Mi usuario'),
+                  if (!_esAdmin) _resumenFila('Asignado a:', 'Mi usuario'),
                   if (_rutaSeleccionadaNombre != null)
                     _resumenFila('Ruta:', _rutaSeleccionadaNombre!),
                 ],
@@ -628,10 +609,9 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
                     child: const Text(
                       'Crear Préstamo',
                       style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.black87,
-                      ),
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black87),
                     ),
                   ),
           ],
@@ -640,24 +620,23 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
     );
   }
 
-  Widget _resumenFila(
-    String label,
-    String valor, {
-    bool bold = false,
-    Color color = Colors.black87,
-  }) {
+  Widget _resumenFila(String label, String valor,
+      {bool bold = false, Color color = Colors.black87}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(label, style: const TextStyle(color: Colors.grey)),
-          Text(
-            valor,
-            style: TextStyle(
-              fontWeight: bold ? FontWeight.bold : FontWeight.normal,
-              color: color,
-              fontSize: bold ? 16 : 14,
+          Flexible(
+            child: Text(
+              valor,
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                fontWeight: bold ? FontWeight.bold : FontWeight.normal,
+                color: color,
+                fontSize: bold ? 16 : 14,
+              ),
             ),
           ),
         ],

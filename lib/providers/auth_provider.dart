@@ -1,15 +1,12 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../utils/constants.dart';
-
 class AuthProvider with ChangeNotifier {
-  final _supabase = Supabase.instance.client;
-  bool _isLoading = false;
+  final supabase = Supabase.instance.client;
 
+  bool _isLoading = false;
   bool get isLoading => _isLoading;
 
   Future<bool> login(String email, String password) async {
@@ -17,34 +14,52 @@ class AuthProvider with ChangeNotifier {
     notifyListeners();
 
     try {
-      // 1. Flutter hace el login directo en Supabase
-      final AuthResponse response = await _supabase.auth.signInWithPassword(
+      // 1. Login con Supabase Auth
+      final AuthResponse response = await supabase.auth.signInWithPassword(
         email: email,
         password: password,
       );
 
-      if (response.user != null) {
-        // 2. Guardamos el token de sesión (JWT) localmente
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString('jwt_token', response.session!.accessToken);
-        
+      final session = response.session;
+      final user = response.user;
+
+      if (session == null || user == null) {
         _isLoading = false;
         notifyListeners();
-        return true;
+        return false;
       }
+
+      // 2. Consultar rol y nombre desde tabla usuarios
+      final data = await supabase
+          .from('usuarios')
+          .select('rol, nombre')
+          .eq('id', user.id)
+          .single();
+
+      // 3. Guardar TODOS los datos necesarios en SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('jwttoken', session.accessToken);
+      await prefs.setString('userrol', data['rol'] ?? 'cobrador');
+      await prefs.setString('usernombre', data['nombre'] ?? '');
+      await prefs.setString('userid', user.id);
+
+      debugPrint('Login OK - rol: ${data['rol']} - token: ${session.accessToken.substring(0, 20)}...');
+
+      _isLoading = false;
+      notifyListeners();
+      return true;
     } catch (e) {
       debugPrint('Error de login: $e');
+      _isLoading = false;
+      notifyListeners();
+      return false;
     }
-
-    _isLoading = false;
-    notifyListeners();
-    return false;
   }
 
   Future<void> logout() async {
-    await _supabase.auth.signOut();
+    await supabase.auth.signOut();
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('jwt_token');
+    await prefs.clear();
     notifyListeners();
   }
 }

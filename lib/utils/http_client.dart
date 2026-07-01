@@ -10,12 +10,15 @@ class ApiClient {
 
   static Future<String?> _getToken() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString('jwt_token');
+    return prefs.getString('jwttoken');
   }
 
   static Future<void> _cerrarSesion() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.clear();
+
+    final context = navigatorKey.currentContext;
+    if (context == null) return;
 
     navigatorKey.currentState?.pushAndRemoveUntil(
       MaterialPageRoute(builder: (_) => const LoginScreen()),
@@ -34,15 +37,25 @@ class ApiClient {
   }
 
   static void _mostrarSnackBar(String mensaje) {
-    final context = navigatorKey.currentState?.context;
+    final context = navigatorKey.currentContext;
     if (context == null) return;
 
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(mensaje),
         backgroundColor: Colors.red,
       ),
     );
+  }
+
+  static Future<http.Response?> _manejarRespuesta(http.Response response) async {
+    if (response.statusCode == 401) {
+      _mostrarSnackBar('Sesión expirada. Inicia sesión nuevamente.');
+      await _cerrarSesion();
+      return null;
+    }
+    return response;
   }
 
   static Future<http.Response?> get(String url) async {
@@ -54,13 +67,7 @@ class ApiClient {
         headers: _headers(token, json: false),
       );
 
-      if (response.statusCode == 401) {
-        _mostrarSnackBar('Sesión expirada. Inicia sesión nuevamente.');
-        await _cerrarSesion();
-        return null;
-      }
-
-      return response;
+      return await _manejarRespuesta(response);
     } catch (e) {
       _mostrarSnackBar('❌ Sin conexión al servidor');
       return null;
@@ -80,13 +87,7 @@ class ApiClient {
         body: jsonEncode(body),
       );
 
-      if (response.statusCode == 401) {
-        _mostrarSnackBar('Sesión expirada. Inicia sesión nuevamente.');
-        await _cerrarSesion();
-        return null;
-      }
-
-      return response;
+      return await _manejarRespuesta(response);
     } catch (e) {
       _mostrarSnackBar('❌ Sin conexión al servidor');
       return null;
@@ -106,13 +107,27 @@ class ApiClient {
         body: jsonEncode(body),
       );
 
-      if (response.statusCode == 401) {
-        _mostrarSnackBar('Sesión expirada. Inicia sesión nuevamente.');
-        await _cerrarSesion();
-        return null;
-      }
+      return await _manejarRespuesta(response);
+    } catch (e) {
+      _mostrarSnackBar('❌ Sin conexión al servidor');
+      return null;
+    }
+  }
 
-      return response;
+  static Future<http.Response?> patch(
+    String url,
+    Map<String, dynamic> body,
+  ) async {
+    final token = await _getToken();
+
+    try {
+      final response = await http.patch(
+        Uri.parse(url),
+        headers: _headers(token),
+        body: jsonEncode(body),
+      );
+
+      return await _manejarRespuesta(response);
     } catch (e) {
       _mostrarSnackBar('❌ Sin conexión al servidor');
       return null;
@@ -128,13 +143,7 @@ class ApiClient {
         headers: _headers(token, json: false),
       );
 
-      if (response.statusCode == 401) {
-        _mostrarSnackBar('Sesión expirada. Inicia sesión nuevamente.');
-        await _cerrarSesion();
-        return null;
-      }
-
-      return response;
+      return await _manejarRespuesta(response);
     } catch (e) {
       _mostrarSnackBar('❌ Sin conexión al servidor');
       return null;
@@ -142,26 +151,22 @@ class ApiClient {
   }
 
   static Future<http.Response?> deleteWithBody(
-      String url, Map<String, dynamic> body) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      // Usa el mismo key que usan get() y post() en este archivo
-      final token = prefs.getString('token') ?? '';
+    String url,
+    Map<String, dynamic> body,
+  ) async {
+    final token = await _getToken();
 
+    try {
       final request = http.Request('DELETE', Uri.parse(url));
-      request.headers['Content-Type'] = 'application/json';
-      request.headers['Authorization'] = 'Bearer $token';
+      request.headers.addAll(_headers(token));
       request.body = jsonEncode(body);
 
       final streamedResponse = await http.Client().send(request);
       final response = await http.Response.fromStream(streamedResponse);
 
-      if (response.statusCode == 401) {
-        // mismo manejo que el resto de métodos de ApiClient
-        return null;
-      }
-      return response;
+      return await _manejarRespuesta(response);
     } catch (e) {
+      _mostrarSnackBar('❌ Sin conexión al servidor');
       return null;
     }
   }

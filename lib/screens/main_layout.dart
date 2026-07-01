@@ -21,17 +21,17 @@ class MainLayout extends StatefulWidget {
 
 class _MainLayoutState extends State<MainLayout> {
   int _currentIndex = 0;
-  String _rol    = 'cobrador';
-  String _nombre = '';
+  String _rol = 'cobrador';
+  String _nombre = 'Usuario';
+  bool _cargandoUsuario = true;
 
-  // ✅ Ahora 6 colores — uno por cada tab
-  final List<Color> _coloresAppBar = [
-    const Color(0xFFB3E5FC), // Dashboard
-    const Color(0xFFE8F5E9), // Clientes  ← NUEVO
-    const Color(0xFFFFCCBC), // Préstamos
-    const Color(0xFFB9F6CA), // Cobradores
-    const Color(0xFFE1BEE7), // Gastos
-    const Color(0xFFFFCDD2), // Clavos
+  final List<Color> _coloresAppBar = const [
+    Color(0xFFB3E5FC),
+    Color(0xFFE8F5E9),
+    Color(0xFFFFCCBC),
+    Color(0xFFB9F6CA),
+    Color(0xFFE1BEE7),
+    Color(0xFFFFCDD2),
   ];
 
   @override
@@ -42,9 +42,26 @@ class _MainLayoutState extends State<MainLayout> {
 
   Future<void> _cargarDatosUsuario() async {
     final prefs = await SharedPreferences.getInstance();
+
+    final rolGuardado = (prefs.getString('userrol') ??
+            prefs.getString('user_rol') ??
+            prefs.getString('rol') ??
+            'cobrador')
+        .trim()
+        .toLowerCase();
+
+    final nombreGuardado = (prefs.getString('usernombre') ??
+            prefs.getString('user_nombre') ??
+            prefs.getString('nombre') ??
+            'Usuario')
+        .trim();
+
+    if (!mounted) return;
+
     setState(() {
-      _rol    = prefs.getString('user_rol')    ?? 'cobrador';
-      _nombre = prefs.getString('user_nombre') ?? 'Usuario';
+      _rol = rolGuardado;
+      _nombre = nombreGuardado.isEmpty ? 'Usuario' : nombreGuardado;
+      _cargandoUsuario = false;
     });
   }
 
@@ -52,22 +69,30 @@ class _MainLayoutState extends State<MainLayout> {
     await Supabase.instance.client.auth.signOut();
     final prefs = await SharedPreferences.getInstance();
     await prefs.clear();
-    if (mounted) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const LoginScreen()),
-      );
-    }
+
+    if (!mounted) return;
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final esAdmin = _rol == 'admin';
 
+    if (_cargandoUsuario) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('CRÉDITO FÁCIL',
-            style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text(
+          'CRÉDITO FÁCIL',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
         centerTitle: true,
         backgroundColor: _coloresAppBar[_currentIndex],
       ),
@@ -92,13 +117,19 @@ class _MainLayoutState extends State<MainLayout> {
                       ),
                     ),
                     const SizedBox(height: 12),
-                    Text(_nombre,
-                        style: const TextStyle(
-                            fontSize: 18, fontWeight: FontWeight.bold)),
+                    Text(
+                      _nombre,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                     Container(
                       margin: const EdgeInsets.only(top: 4),
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 3),
+                        horizontal: 10,
+                        vertical: 3,
+                      ),
                       decoration: BoxDecoration(
                         color: esAdmin ? Colors.indigo : Colors.blue,
                         borderRadius: BorderRadius.circular(10),
@@ -106,76 +137,81 @@ class _MainLayoutState extends State<MainLayout> {
                       child: Text(
                         esAdmin ? 'Administrador' : 'Cobrador',
                         style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold),
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
                   ],
                 ),
               ),
-              const SizedBox(height: 8),
-
-              // ✅ Drawer — índices actualizados
-              _drawerItem(Icons.home,                  'Dashboard',         Colors.blue,   0),
-              _drawerItem(Icons.people,                'Clientes',          Colors.teal,   1), // ← NUEVO
-              _drawerItem(Icons.receipt_long,          'Préstamos',         Colors.orange, 2), // ← era 1
-              _drawerItem(Icons.motorcycle,            'Cobradores',        Colors.green,  3), // ← era 2
-              _drawerItem(Icons.savings,               'Gastos Diarios',    Colors.purple, 4), // ← era 3
-              _drawerItem(Icons.warning_amber_rounded, 'Clavos (Morosos)',  Colors.red,    5), // ← era 4
-
+              _drawerItem(Icons.home, 'Dashboard', Colors.blue, 0),
+              _drawerItem(Icons.people, 'Clientes', Colors.teal, 1),
+              _drawerItem(Icons.receipt_long, 'Préstamos', Colors.orange, 2),
+              _drawerItem(Icons.motorcycle, 'Cobradores', Colors.green, 3),
+              _drawerItem(Icons.savings, 'Gastos Diarios', Colors.purple, 4),
+              _drawerItem(Icons.warning_amber_rounded, 'Clavos Morosos', Colors.red, 5),
               const Divider(),
-
               if (esAdmin)
                 ListTile(
-                  leading: const Icon(Icons.admin_panel_settings,
-                      color: Colors.indigo),
-                  title: const Text('Panel Administrador',
-                      style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: Colors.indigo)),
+                  leading: const Icon(Icons.admin_panel_settings, color: Colors.indigo),
+                  title: const Text(
+                    'Panel Administrador',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: Colors.indigo,
+                    ),
+                  ),
                   onTap: () {
                     Navigator.pop(context);
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                          builder: (_) => const AdminPanelScreen()),
+                        builder: (_) => const AdminPanelScreen(),
+                      ),
                     );
                   },
                 ),
-
               const Spacer(),
               const Divider(),
-
               ListTile(
                 leading: const Icon(Icons.logout, color: Colors.red),
-                title: const Text('Cerrar Sesión',
-                    style: TextStyle(
-                        color: Colors.red, fontWeight: FontWeight.bold)),
-                onTap: () {
-                  showDialog(
+                title: const Text(
+                  'Cerrar Sesión',
+                  style: TextStyle(
+                    color: Colors.red,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                onTap: () async {
+                  final confirmar = await showDialog<bool>(
                     context: context,
                     builder: (ctx) => AlertDialog(
                       title: const Text('Cerrar Sesión'),
                       content: const Text('¿Estás seguro de que quieres salir?'),
                       actions: [
                         TextButton(
-                          onPressed: () => Navigator.pop(ctx),
+                          onPressed: () => Navigator.pop(ctx, false),
                           child: const Text('Cancelar'),
                         ),
                         ElevatedButton(
-                          onPressed: () {
-                            Navigator.pop(ctx);
-                            _logout();
-                          },
+                          onPressed: () => Navigator.pop(ctx, true),
                           style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.red),
-                          child: const Text('Salir',
-                              style: TextStyle(color: Colors.white)),
+                            backgroundColor: Colors.red,
+                          ),
+                          child: const Text(
+                            'Salir',
+                            style: TextStyle(color: Colors.white),
+                          ),
                         ),
                       ],
                     ),
                   );
+
+                  if (confirmar == true) {
+                    await _logout();
+                  }
                 },
               ),
               const SizedBox(height: 8),
@@ -183,21 +219,17 @@ class _MainLayoutState extends State<MainLayout> {
           ),
         ),
       ),
-
-      // ✅ IndexedStack — ahora con 6 screens
       body: IndexedStack(
         index: _currentIndex,
         children: const [
-          ReportesScreen(),   // 0 - Dashboard
-          ClientesScreen(),   // 1 - Clientes   ← NUEVO
-          PrestamosScreen(),  // 2 - Préstamos
-          CobradoresScreen(), // 3 - Cobradores
-          GastosScreen(),     // 4 - Gastos
-          ClavosScreen(),     // 5 - Clavos
+          ReportesScreen(),
+          ClientesScreen(),
+          PrestamosScreen(),
+          CobradoresScreen(),
+          GastosScreen(),
+          ClavosScreen(),
         ],
       ),
-
-      // ✅ BottomBar — ahora con 6 items
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
         onTap: (index) => setState(() => _currentIndex = index),
@@ -205,11 +237,11 @@ class _MainLayoutState extends State<MainLayout> {
         selectedItemColor: Colors.blue,
         unselectedItemColor: Colors.grey,
         items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.home),                  label: 'Dashboard'),
-          BottomNavigationBarItem(icon: Icon(Icons.people),                label: 'Clientes'),
-          BottomNavigationBarItem(icon: Icon(Icons.receipt_long),          label: 'Préstamos'),
-          BottomNavigationBarItem(icon: Icon(Icons.motorcycle),            label: 'Cobradores'),
-          BottomNavigationBarItem(icon: Icon(Icons.savings),               label: 'Gastos'),
+          BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Dashboard'),
+          BottomNavigationBarItem(icon: Icon(Icons.people), label: 'Clientes'),
+          BottomNavigationBarItem(icon: Icon(Icons.receipt_long), label: 'Préstamos'),
+          BottomNavigationBarItem(icon: Icon(Icons.motorcycle), label: 'Cobradores'),
+          BottomNavigationBarItem(icon: Icon(Icons.savings), label: 'Gastos'),
           BottomNavigationBarItem(icon: Icon(Icons.warning_amber_rounded), label: 'Clavos'),
         ],
       ),
@@ -218,12 +250,16 @@ class _MainLayoutState extends State<MainLayout> {
 
   Widget _drawerItem(IconData icon, String label, Color color, int index) {
     final isSelected = _currentIndex == index;
+
     return ListTile(
       leading: Icon(icon, color: color),
-      title: Text(label,
-          style: TextStyle(
-              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-              color: isSelected ? color : Colors.black87)),
+      title: Text(
+        label,
+        style: TextStyle(
+          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+          color: isSelected ? color : Colors.black87,
+        ),
+      ),
       tileColor: isSelected ? color.withOpacity(0.1) : null,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       onTap: () {

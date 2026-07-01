@@ -1,10 +1,10 @@
 // lib/screens/clientes_screen.dart
 import 'dart:convert';
-import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/client_service.dart';
 import '../utils/constants.dart';
+import '../utils/http_client.dart';
 
 class ClientesScreen extends StatefulWidget {
   const ClientesScreen({super.key});
@@ -29,9 +29,6 @@ class _ClientesScreenState extends State<ClientesScreen>
   bool _modoSeleccion = false;
   Set<String> _seleccionados = {};
 
-  // Token cacheado para no leer SharedPreferences múltiples veces
-  String _token = '';
-
   @override
   bool get wantKeepAlive => true;
 
@@ -52,29 +49,26 @@ class _ClientesScreenState extends State<ClientesScreen>
 
   Future<void> _inicializar() async {
     final prefs = await SharedPreferences.getInstance();
-    final rol =
-        prefs.getString('user_rol') ?? prefs.getString('userrol') ?? 'cobrador';
-
-    // Intentar todas las keys posibles donde se guarda el token
-    _token = prefs.getString('token') ??
-        prefs.getString('jwt_token') ??
-        prefs.getString('jwttoken') ??
-        prefs.getString('access_token') ??
-        prefs.getString('accessToken') ??
-        '';
+    final rol = prefs.getString('userrol') ??
+        prefs.getString('user_rol') ??
+        'cobrador';
 
     if (!mounted) return;
 
     setState(() => _esAdmin = rol == 'admin');
 
-    if (_esAdmin) await _cargarCobradores();
+    if (_esAdmin) {
+      await _cargarCobradores();
+    }
     await _cargarClientes();
   }
 
   Future<void> _cargarCobradores() async {
     try {
       final data = await _service.getCobradores();
-      if (mounted) setState(() => _cobradores = data);
+      if (mounted) {
+        setState(() => _cobradores = data);
+      }
     } catch (_) {}
   }
 
@@ -85,18 +79,22 @@ class _ClientesScreenState extends State<ClientesScreen>
     try {
       final data = await _service.getClientes(cobradorId: cobradorId);
       if (!mounted) return;
+
       setState(() {
         _clientes = data;
         _clientesFiltrados = data;
         _isLoading = false;
       });
+
       _aplicarBusqueda(_searchCtrl.text);
     } catch (e) {
       if (!mounted) return;
+
       setState(() {
         _isLoading = false;
         _dataCargada = false;
       });
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Error cargando clientes: $e'),
@@ -108,6 +106,7 @@ class _ClientesScreenState extends State<ClientesScreen>
 
   void _aplicarBusqueda(String query) {
     final q = query.toLowerCase().trim();
+
     setState(() {
       _clientesFiltrados = q.isEmpty
           ? _clientes
@@ -115,6 +114,7 @@ class _ClientesScreenState extends State<ClientesScreen>
               final nombre = (c['nombre'] ?? '').toString().toLowerCase();
               final telefono = (c['telefono'] ?? '').toString().toLowerCase();
               final dir = (c['direccion'] ?? '').toString().toLowerCase();
+
               return nombre.contains(q) ||
                   telefono.contains(q) ||
                   dir.contains(q);
@@ -126,9 +126,11 @@ class _ClientesScreenState extends State<ClientesScreen>
     setState(() {
       _dataCargada = false;
       _clientes = [];
+      _clientesFiltrados = [];
       _modoSeleccion = false;
       _seleccionados = {};
     });
+
     await _cargarClientes(cobradorId: _cobradorSeleccionado);
   }
 
@@ -167,18 +169,21 @@ class _ClientesScreenState extends State<ClientesScreen>
         .where((c) => _seleccionados.contains(c['id'].toString()))
         .toList();
 
-    final conPrestamos =
-        seleccionadosList.where((c) => (c['prestamos_activos'] ?? 0) > 0).length;
+    final conPrestamos = seleccionadosList
+        .where((c) => (c['prestamos_activos'] ?? 0) > 0)
+        .length;
 
     final confirmar = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Row(children: [
-          Icon(Icons.warning_amber_rounded, color: Colors.red),
-          SizedBox(width: 8),
-          Text('Eliminar clientes'),
-        ]),
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.red),
+            SizedBox(width: 8),
+            Text('Eliminar clientes'),
+          ],
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -197,14 +202,20 @@ class _ClientesScreenState extends State<ClientesScreen>
                 ),
                 child: Text(
                   '⚠️ $conPrestamos cliente(s) tienen préstamos activos que se perderán.',
-                  style: TextStyle(color: Colors.red.shade700, fontSize: 13),
+                  style: TextStyle(
+                    color: Colors.red.shade700,
+                    fontSize: 13,
+                  ),
                 ),
               ),
             ],
             const SizedBox(height: 10),
             const Text(
               'Esta acción no se puede deshacer.',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 13,
+              ),
             ),
           ],
         ),
@@ -218,7 +229,10 @@ class _ClientesScreenState extends State<ClientesScreen>
             icon: const Icon(Icons.delete, color: Colors.white, size: 16),
             label: const Text(
               'Eliminar',
-              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
             ),
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
           ),
@@ -228,44 +242,45 @@ class _ClientesScreenState extends State<ClientesScreen>
 
     if (confirmar != true) return;
 
-    // Mostrar loading
-    if (mounted) setState(() => _isLoading = true);
+    if (mounted) {
+      setState(() => _isLoading = true);
+    }
 
     try {
-      final uri = Uri.parse('${Constants.apiUrl}/api/clients');
-      final request = http.Request('DELETE', uri);
-      request.headers['Content-Type'] = 'application/json';
-      request.headers['Authorization'] = 'Bearer $_token';
-      // El backend espera 'clienteids' según clientController.js
-      request.body = jsonEncode({'clienteids': _seleccionados.toList()});
-
-      final streamed = await http.Client().send(request);
-      final response = await http.Response.fromStream(streamed);
+      final response = await ApiClient.deleteWithBody(
+        '${Constants.apiUrl}/api/clients',
+        {'clienteids': _seleccionados.toList()},
+      );
 
       if (!mounted) return;
+
       setState(() => _isLoading = false);
 
-      if (response.statusCode == 200) {
+      if (response != null && response.statusCode == 200) {
         final eliminados = _seleccionados.length;
+
         setState(() {
           _modoSeleccion = false;
           _seleccionados = {};
         });
+
         await _recargar();
+
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('✅ $eliminados cliente(s) eliminado(s) correctamente'),
+              content:
+                  Text('✅ $eliminados cliente(s) eliminado(s) correctamente'),
               backgroundColor: Colors.green,
               behavior: SnackBarBehavior.floating,
             ),
           );
         }
       } else {
-        // Parsear mensaje de error del backend
-        String mensaje = 'Error al eliminar clientes (${response.statusCode})';
+        String mensaje = 'Error al eliminar clientes';
+
         try {
-          final data = jsonDecode(response.body);
+          final data = jsonDecode(response?.body ?? '{}');
           mensaje = data['error'] ?? mensaje;
         } catch (_) {}
 
@@ -312,13 +327,15 @@ class _ClientesScreenState extends State<ClientesScreen>
             const SizedBox(height: 12),
             ListTile(
               shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10)),
+                borderRadius: BorderRadius.circular(10),
+              ),
               tileColor: _cobradorSeleccionado == null
                   ? Colors.blue.withOpacity(0.08)
                   : null,
               leading: CircleAvatar(
-                backgroundColor:
-                    _cobradorSeleccionado == null ? Colors.blue : Colors.grey[300],
+                backgroundColor: _cobradorSeleccionado == null
+                    ? Colors.blue
+                    : Colors.grey[300],
                 child: const Icon(Icons.people, color: Colors.white, size: 18),
               ),
               title: const Text('Todos los clientes'),
@@ -339,16 +356,20 @@ class _ClientesScreenState extends State<ClientesScreen>
               final id = c['id'].toString();
               final nombre = c['nombre'].toString();
               final activo = _cobradorSeleccionado == id;
+
               return ListTile(
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10)),
+                  borderRadius: BorderRadius.circular(10),
+                ),
                 tileColor: activo ? Colors.blue.withOpacity(0.08) : null,
                 leading: CircleAvatar(
                   backgroundColor: activo ? Colors.blue : Colors.grey[300],
                   child: Text(
                     nombre.isNotEmpty ? nombre[0].toUpperCase() : '?',
                     style: const TextStyle(
-                        color: Colors.white, fontWeight: FontWeight.bold),
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
                 title: Text(nombre),
@@ -375,13 +396,14 @@ class _ClientesScreenState extends State<ClientesScreen>
   Widget build(BuildContext context) {
     super.build(context);
 
-    if (_isLoading) return const Center(child: CircularProgressIndicator());
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
 
     return Container(
       color: const Color(0xFFE3F2FD),
       child: Column(
         children: [
-          // Barra de búsqueda + botones
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
             child: Row(
@@ -405,7 +427,9 @@ class _ClientesScreenState extends State<ClientesScreen>
                       filled: true,
                       fillColor: Colors.white,
                       contentPadding: const EdgeInsets.symmetric(
-                          vertical: 0, horizontal: 16),
+                        vertical: 0,
+                        horizontal: 16,
+                      ),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(30),
                         borderSide: BorderSide.none,
@@ -445,8 +469,7 @@ class _ClientesScreenState extends State<ClientesScreen>
                       ),
                       child: Icon(
                         _modoSeleccion ? Icons.close : Icons.checklist,
-                        color:
-                            _modoSeleccion ? Colors.white : Colors.grey[700],
+                        color: _modoSeleccion ? Colors.white : Colors.grey[700],
                       ),
                     ),
                   ),
@@ -455,13 +478,11 @@ class _ClientesScreenState extends State<ClientesScreen>
             ),
           ),
 
-          // Barra de selección múltiple
           if (_modoSeleccion)
             AnimatedContainer(
               duration: const Duration(milliseconds: 200),
               margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               decoration: BoxDecoration(
                 color: Colors.red.shade50,
                 borderRadius: BorderRadius.circular(12),
@@ -469,8 +490,11 @@ class _ClientesScreenState extends State<ClientesScreen>
               ),
               child: Row(
                 children: [
-                  Icon(Icons.info_outline,
-                      size: 16, color: Colors.red.shade400),
+                  Icon(
+                    Icons.info_outline,
+                    size: 16,
+                    color: Colors.red.shade400,
+                  ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
@@ -500,8 +524,7 @@ class _ClientesScreenState extends State<ClientesScreen>
                     ),
                     style: TextButton.styleFrom(
                       foregroundColor: Colors.red.shade700,
-                      padding:
-                          const EdgeInsets.symmetric(horizontal: 8),
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
                     ),
                   ),
                   if (_seleccionados.isNotEmpty)
@@ -514,7 +537,6 @@ class _ClientesScreenState extends State<ClientesScreen>
               ),
             ),
 
-          // Contador de clientes
           if (!_modoSeleccion)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
@@ -536,8 +558,8 @@ class _ClientesScreenState extends State<ClientesScreen>
                   ),
                   const SizedBox(width: 6),
                   Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 2),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                     decoration: BoxDecoration(
                       color: Colors.blue[100],
                       borderRadius: BorderRadius.circular(10),
@@ -555,7 +577,6 @@ class _ClientesScreenState extends State<ClientesScreen>
               ),
             ),
 
-          // Lista de clientes
           Expanded(
             child: RefreshIndicator(
               onRefresh: _recargar,
@@ -568,8 +589,11 @@ class _ClientesScreenState extends State<ClientesScreen>
                             child: Column(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                Icon(Icons.person_search,
-                                    size: 60, color: Colors.grey[400]),
+                                Icon(
+                                  Icons.person_search,
+                                  size: 60,
+                                  color: Colors.grey[400],
+                                ),
                                 const SizedBox(height: 12),
                                 Text(
                                   _searchCtrl.text.isNotEmpty
@@ -577,7 +601,9 @@ class _ClientesScreenState extends State<ClientesScreen>
                                       : 'No hay clientes registrados',
                                   textAlign: TextAlign.center,
                                   style: TextStyle(
-                                      color: Colors.grey[500], fontSize: 15),
+                                    color: Colors.grey[500],
+                                    fontSize: 15,
+                                  ),
                                 ),
                               ],
                             ),
@@ -626,7 +652,9 @@ class _ClientesScreenState extends State<ClientesScreen>
     return GestureDetector(
       onLongPress: _esAdmin
           ? () {
-              if (!_modoSeleccion) setState(() => _modoSeleccion = true);
+              if (!_modoSeleccion) {
+                setState(() => _modoSeleccion = true);
+              }
               _toggleSeleccion(id);
             }
           : null,
@@ -643,8 +671,7 @@ class _ClientesScreenState extends State<ClientesScreen>
           ),
           boxShadow: [
             BoxShadow(
-              color:
-                  Colors.black.withOpacity(seleccionado ? 0.03 : 0.06),
+              color: Colors.black.withOpacity(seleccionado ? 0.03 : 0.06),
               blurRadius: 6,
               offset: const Offset(0, 2),
             ),
@@ -655,7 +682,6 @@ class _ClientesScreenState extends State<ClientesScreen>
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Checkbox o Avatar
               if (_modoSeleccion)
                 GestureDetector(
                   onTap: () => _toggleSeleccion(id),
@@ -665,8 +691,7 @@ class _ClientesScreenState extends State<ClientesScreen>
                     height: 26,
                     margin: const EdgeInsets.only(top: 10, right: 12),
                     decoration: BoxDecoration(
-                      color:
-                          seleccionado ? Colors.red : Colors.transparent,
+                      color: seleccionado ? Colors.red : Colors.transparent,
                       border: Border.all(
                         color: seleccionado
                             ? Colors.red
@@ -676,8 +701,11 @@ class _ClientesScreenState extends State<ClientesScreen>
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: seleccionado
-                        ? const Icon(Icons.check,
-                            color: Colors.white, size: 16)
+                        ? const Icon(
+                            Icons.check,
+                            color: Colors.white,
+                            size: 16,
+                          )
                         : null,
                   ),
                 )
@@ -698,7 +726,6 @@ class _ClientesScreenState extends State<ClientesScreen>
                   ),
                 ),
 
-              // Datos del cliente
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -709,17 +736,22 @@ class _ClientesScreenState extends State<ClientesScreen>
                           child: Text(
                             nombre,
                             style: const TextStyle(
-                                fontWeight: FontWeight.bold, fontSize: 15),
+                              fontWeight: FontWeight.bold,
+                              fontSize: 15,
+                            ),
                           ),
                         ),
                         Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 3),
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
                           decoration: BoxDecoration(
                             color: colorEstado.withOpacity(0.12),
                             borderRadius: BorderRadius.circular(8),
                             border: Border.all(
-                                color: colorEstado.withOpacity(0.4)),
+                              color: colorEstado.withOpacity(0.4),
+                            ),
                           ),
                           child: Text(
                             labelEstado,
@@ -736,13 +768,14 @@ class _ClientesScreenState extends State<ClientesScreen>
                     if (telefono.isNotEmpty)
                       Row(
                         children: [
-                          Icon(Icons.phone,
-                              size: 13, color: Colors.grey[500]),
+                          Icon(Icons.phone, size: 13, color: Colors.grey[500]),
                           const SizedBox(width: 4),
                           Text(
                             telefono,
                             style: TextStyle(
-                                color: Colors.grey[600], fontSize: 12),
+                              color: Colors.grey[600],
+                              fontSize: 12,
+                            ),
                           ),
                         ],
                       ),
@@ -751,8 +784,11 @@ class _ClientesScreenState extends State<ClientesScreen>
                         padding: const EdgeInsets.only(top: 2),
                         child: Row(
                           children: [
-                            Icon(Icons.location_on,
-                                size: 13, color: Colors.grey[500]),
+                            Icon(
+                              Icons.location_on,
+                              size: 13,
+                              color: Colors.grey[500],
+                            ),
                             const SizedBox(width: 4),
                             Expanded(
                               child: Text(
@@ -760,7 +796,9 @@ class _ClientesScreenState extends State<ClientesScreen>
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
-                                    color: Colors.grey[600], fontSize: 12),
+                                  color: Colors.grey[600],
+                                  fontSize: 12,
+                                ),
                               ),
                             ),
                           ],
@@ -770,12 +808,18 @@ class _ClientesScreenState extends State<ClientesScreen>
                     const Divider(height: 8),
                     Row(
                       children: [
-                        _miniStat(Icons.receipt_long,
-                            '$totalPrestamos préstamos', Colors.blue),
+                        _miniStat(
+                          Icons.receipt_long,
+                          '$totalPrestamos préstamos',
+                          Colors.blue,
+                        ),
                         if (saldo > 0) ...[
                           const SizedBox(width: 12),
-                          _miniStat(Icons.attach_money,
-                              '\$${saldo.toStringAsFixed(0)}', Colors.orange),
+                          _miniStat(
+                            Icons.attach_money,
+                            '\$${saldo.toStringAsFixed(0)}',
+                            Colors.orange,
+                          ),
                         ],
                       ],
                     ),
@@ -783,13 +827,21 @@ class _ClientesScreenState extends State<ClientesScreen>
                       const SizedBox(height: 4),
                       Row(
                         children: [
-                          Icon(Icons.motorcycle,
-                              size: 13, color: Colors.grey[500]),
+                          Icon(
+                            Icons.motorcycle,
+                            size: 13,
+                            color: Colors.grey[500],
+                          ),
                           const SizedBox(width: 4),
-                          Text(
-                            '$cobradorNombre · $rutaNombre',
-                            style: TextStyle(
-                                color: Colors.grey[500], fontSize: 11),
+                          Expanded(
+                            child: Text(
+                              '$cobradorNombre · $rutaNombre',
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: Colors.grey[500],
+                                fontSize: 11,
+                              ),
+                            ),
                           ),
                         ],
                       ),
@@ -812,7 +864,10 @@ class _ClientesScreenState extends State<ClientesScreen>
         Text(
           label,
           style: TextStyle(
-              fontSize: 11, color: color, fontWeight: FontWeight.bold),
+            fontSize: 11,
+            color: color,
+            fontWeight: FontWeight.bold,
+          ),
         ),
       ],
     );
