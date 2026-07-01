@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:frontend_flutter/providers/auth_provider.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../utils/constants.dart';
@@ -57,16 +58,16 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
     final prefs = await SharedPreferences.getInstance();
 
     // Lee directamente desde SharedPreferences — AuthService.login los guarda correctamente
-    final rolGuardado = (prefs.getString('userrol') ?? '').trim().toLowerCase();
-    _userId = prefs.getString('userid') ?? '';
+    final rol = await AuthProvider.getRol();
+    _userId = await AuthProvider.getUserId();
 
     debugPrint('═══════════════════════════════════');
     debugPrint('NuevoPrestamoScreen._cargarDatos()');
-    debugPrint('userrol en prefs: "$rolGuardado"');
+    debugPrint('userrol en prefs: "$rol"');
     debugPrint('userid en prefs: "$_userId"');
     debugPrint('═══════════════════════════════════');
 
-    final esAdmin = rolGuardado == 'admin';
+    final esAdmin = rol == 'admin';
 
     if (!mounted) return;
     setState(() {

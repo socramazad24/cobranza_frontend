@@ -1,6 +1,8 @@
+// lib/screens/login_screen.dart
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import '../services/auth_service.dart';
+import 'package:provider/provider.dart';
+import '../providers/auth_provider.dart';
+import '../utils/storage_keys.dart';
 import 'main_layout.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -15,7 +17,6 @@ class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController passwordController = TextEditingController();
   bool isLoading = false;
   bool obscurePassword = true;
-  final AuthService authService = AuthService();
 
   void handleLogin() async {
     final email = emailController.text.trim();
@@ -29,24 +30,22 @@ class _LoginScreenState extends State<LoginScreen> {
     }
 
     setState(() => isLoading = true);
-    final success = await authService.login(email, password);
+
+    // ✅ USA AuthProvider, NO authService
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final success = await authProvider.login(email, password);
+
     if (!mounted) return;
     setState(() => isLoading = false);
 
     if (success) {
-      // Debug: confirma que token y rol se guardaron
-      final prefs = await SharedPreferences.getInstance();
-      print('Token: ${prefs.getString('jwttoken')?.substring(0, 20)}...');
-      print('Rol: ${prefs.getString('userrol')}');
-      print('Nombre: ${prefs.getString('usernombre')}');
-      print('UserId: ${prefs.getString('userid')}');
-
       if (!mounted) return;
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(builder: (_) => const MainLayout()),
       );
     } else {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Credenciales incorrectas o error de servidor'),
@@ -74,7 +73,6 @@ class _LoginScreenState extends State<LoginScreen> {
             mainAxisAlignment: MainAxisAlignment.center,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Logo
               const Center(
                 child: CircleAvatar(
                   radius: 45,
@@ -83,7 +81,6 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
               ),
               const SizedBox(height: 24),
-              // Título
               const Text(
                 'Crédito Fácil',
                 textAlign: TextAlign.center,
@@ -97,7 +94,6 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
               const SizedBox(height: 40),
 
-              // Email
               const Text('Correo electrónico', style: TextStyle(fontWeight: FontWeight.w600)),
               const SizedBox(height: 8),
               TextField(
@@ -110,7 +106,6 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
               const SizedBox(height: 16),
 
-              // Password
               const Text('Contraseña', style: TextStyle(fontWeight: FontWeight.w600)),
               const SizedBox(height: 8),
               TextField(
@@ -127,7 +122,6 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
               const SizedBox(height: 32),
 
-              // Botón login
               isLoading
                   ? const Center(child: CircularProgressIndicator())
                   : ElevatedButton(

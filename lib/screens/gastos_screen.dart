@@ -1,6 +1,7 @@
 // lib/screens/gastos_screen.dart
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:frontend_flutter/providers/auth_provider.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -30,7 +31,7 @@ class _GastosScreenState extends State<GastosScreen> {
   Future<void> _cargarDatos() async {
     setState(() => _isLoading = true);
     final prefs = await SharedPreferences.getInstance();
-    final rol = prefs.getString('user_rol') ?? 'cobrador';
+    final rol = await AuthProvider.getRol();
     setState(() => _esAdmin = rol == 'admin');
 
     if (_esAdmin) {

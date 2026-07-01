@@ -2,6 +2,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:frontend_flutter/providers/auth_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/cobrador_service.dart';
 import '../utils/constants.dart';
@@ -38,8 +39,7 @@ class _CobradoresScreenState extends State<CobradoresScreen> {
     setState(() => _isLoading = true);
 
     final prefs = await SharedPreferences.getInstance();
-    final rol =
-        prefs.getString('user_rol') ?? prefs.getString('userrol') ?? 'cobrador';
+    final rol = await AuthProvider.getRol();
 
     _esAdmin = rol == 'admin';
 

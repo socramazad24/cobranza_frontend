@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:frontend_flutter/providers/auth_provider.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -42,8 +43,8 @@ class _PrestamosScreenState extends State<PrestamosScreen> {
 
   Future<void> _cargarRol() async {
     final prefs = await SharedPreferences.getInstance();
-    final rol =
-        prefs.getString('user_rol') ?? prefs.getString('userrol') ?? 'cobrador';
+    final rol = await AuthProvider.getRol();
+
     if (mounted) setState(() => _esAdmin = rol == 'admin');
   }
 
@@ -404,9 +405,9 @@ class _DetallePrestamoScreenState extends State<DetallePrestamoScreen> {
   }
 
   Future<void> _cargarDatos() async {
-    final prefs = await SharedPreferences.getInstance();
-    final rol =
-        prefs.getString('user_rol') ?? prefs.getString('userrol') ?? 'cobrador';
+    await SharedPreferences.getInstance();
+    final rol = await AuthProvider.getRol();
+
 
     if (mounted) {
       setState(() => _esAdmin = rol == 'admin');

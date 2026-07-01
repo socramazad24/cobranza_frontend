@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:frontend_flutter/providers/auth_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -84,9 +85,9 @@ class _ReportesScreenState extends State<ReportesScreen>
     }
 
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final rol = (prefs.getString('user_rol') ?? 'cobrador').trim().toLowerCase();
-      esAdmin = rol == 'admin';
+      await SharedPreferences.getInstance();
+      esAdmin = await AuthProvider.esAdmin();
+
 
       if (esAdmin) {
         final results = await Future.wait([

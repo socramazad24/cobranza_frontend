@@ -1,10 +1,10 @@
-// lib/screens/main_layout.dart
+// lib/screens/main_layout.dart - reemplaza _cargarDatosUsuario
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-
+import '../utils/storage_keys.dart';
 import 'reportes_screen.dart';
-import 'clientes_screen.dart';      // ← NUEVO
+import 'clientes_screen.dart';
 import 'prestamos_screen.dart';
 import 'cobradores_screen.dart';
 import 'gastos_screen.dart';
@@ -43,17 +43,12 @@ class _MainLayoutState extends State<MainLayout> {
   Future<void> _cargarDatosUsuario() async {
     final prefs = await SharedPreferences.getInstance();
 
-    final rolGuardado = (prefs.getString('userrol') ??
-            prefs.getString('user_rol') ??
-            prefs.getString('rol') ??
-            'cobrador')
+    // ✅ USA StorageKeys SIEMPRE
+    final rolGuardado = (prefs.getString(StorageKeys.userRol) ?? 'cobrador')
         .trim()
         .toLowerCase();
 
-    final nombreGuardado = (prefs.getString('usernombre') ??
-            prefs.getString('user_nombre') ??
-            prefs.getString('nombre') ??
-            'Usuario')
+    final nombreGuardado = (prefs.getString(StorageKeys.userNombre) ?? 'Usuario')
         .trim();
 
     if (!mounted) return;
@@ -63,10 +58,14 @@ class _MainLayoutState extends State<MainLayout> {
       _nombre = nombreGuardado.isEmpty ? 'Usuario' : nombreGuardado;
       _cargandoUsuario = false;
     });
+
+    debugPrint('MainLayout: rol=$_rol, nombre=$_nombre');
   }
 
   Future<void> _logout() async {
-    await Supabase.instance.client.auth.signOut();
+    try {
+      await Supabase.instance.client.auth.signOut();
+    } catch (_) {}
     final prefs = await SharedPreferences.getInstance();
     await prefs.clear();
 
@@ -82,9 +81,7 @@ class _MainLayoutState extends State<MainLayout> {
     final esAdmin = _rol == 'admin';
 
     if (_cargandoUsuario) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
     return Scaffold(
@@ -117,30 +114,17 @@ class _MainLayoutState extends State<MainLayout> {
                       ),
                     ),
                     const SizedBox(height: 12),
-                    Text(
-                      _nombre,
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
+                    Text(_nombre, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                     Container(
                       margin: const EdgeInsets.only(top: 4),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 3,
-                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
                       decoration: BoxDecoration(
                         color: esAdmin ? Colors.indigo : Colors.blue,
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: Text(
                         esAdmin ? 'Administrador' : 'Cobrador',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                        ),
+                        style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
                       ),
                     ),
                   ],
@@ -156,62 +140,34 @@ class _MainLayoutState extends State<MainLayout> {
               if (esAdmin)
                 ListTile(
                   leading: const Icon(Icons.admin_panel_settings, color: Colors.indigo),
-                  title: const Text(
-                    'Panel Administrador',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: Colors.indigo,
-                    ),
-                  ),
+                  title: const Text('Panel Administrador', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.indigo)),
                   onTap: () {
                     Navigator.pop(context);
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const AdminPanelScreen(),
-                      ),
-                    );
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminPanelScreen()));
                   },
                 ),
               const Spacer(),
               const Divider(),
               ListTile(
                 leading: const Icon(Icons.logout, color: Colors.red),
-                title: const Text(
-                  'Cerrar Sesión',
-                  style: TextStyle(
-                    color: Colors.red,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
+                title: const Text('Cerrar Sesión', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
                 onTap: () async {
                   final confirmar = await showDialog<bool>(
                     context: context,
                     builder: (ctx) => AlertDialog(
                       title: const Text('Cerrar Sesión'),
-                      content: const Text('¿Estás seguro de que quieres salir?'),
+                      content: const Text('¿Estás seguro?'),
                       actions: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(ctx, false),
-                          child: const Text('Cancelar'),
-                        ),
+                        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
                         ElevatedButton(
                           onPressed: () => Navigator.pop(ctx, true),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.red,
-                          ),
-                          child: const Text(
-                            'Salir',
-                            style: TextStyle(color: Colors.white),
-                          ),
+                          style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                          child: const Text('Salir', style: TextStyle(color: Colors.white)),
                         ),
                       ],
                     ),
                   );
-
-                  if (confirmar == true) {
-                    await _logout();
-                  }
+                  if (confirmar == true) await _logout();
                 },
               ),
               const SizedBox(height: 8),
@@ -250,16 +206,9 @@ class _MainLayoutState extends State<MainLayout> {
 
   Widget _drawerItem(IconData icon, String label, Color color, int index) {
     final isSelected = _currentIndex == index;
-
     return ListTile(
       leading: Icon(icon, color: color),
-      title: Text(
-        label,
-        style: TextStyle(
-          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-          color: isSelected ? color : Colors.black87,
-        ),
-      ),
+      title: Text(label, style: TextStyle(fontWeight: isSelected ? FontWeight.bold : FontWeight.normal, color: isSelected ? color : Colors.black87)),
       tileColor: isSelected ? color.withOpacity(0.1) : null,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       onTap: () {

@@ -1,6 +1,7 @@
 // lib/screens/clientes_screen.dart
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:frontend_flutter/providers/auth_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/client_service.dart';
 import '../utils/constants.dart';
@@ -49,9 +50,8 @@ class _ClientesScreenState extends State<ClientesScreen>
 
   Future<void> _inicializar() async {
     final prefs = await SharedPreferences.getInstance();
-    final rol = prefs.getString('userrol') ??
-        prefs.getString('user_rol') ??
-        'cobrador';
+    final rol = await AuthProvider.getRol();
+
 
     if (!mounted) return;
 
