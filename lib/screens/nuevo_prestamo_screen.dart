@@ -1,11 +1,17 @@
+// lib/screens/nuevo_prestamo_screen.dart
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:frontend_flutter/providers/auth_provider.dart';
+import 'package:flutter/foundation.dart';
+import 'package:intl/intl.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../utils/constants.dart';
+import '../utils/storage_keys.dart';
+import '../models/frecuencia.dart';
+import '../widgets/frecuencia_selector.dart';
 import '../services/cobrador_service.dart';
+import '../providers/auth_provider.dart';
 
 class NuevoPrestamoScreen extends StatefulWidget {
   const NuevoPrestamoScreen({super.key});
@@ -26,7 +32,7 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
   static const double _montoMax = 5000000;
   static const double _totalPagarMax = 8000000;
   static const int _diasPlazoMin = 7;
-  static const int _diasPlazoMax = 60;
+  static const int _diasPlazoMax = 365;
 
   double _monto = 0;
   double _totalPagar = 0;
@@ -34,6 +40,8 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
   bool _isLoading = false;
   bool _esAdmin = false;
   bool _cargando = true;
+
+  String _frecuenciaSeleccionada = 'diario';
 
   List _cobradores = [];
   String? _cobradorSeleccionadoId;
@@ -45,8 +53,18 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
 
   String? _userId;
 
-  double get _cuotaDiaria =>
-      (_diasPlazo > 0 && _totalPagar > 0) ? _totalPagar / _diasPlazo : 0;
+  FrecuenciaPago get _frecuenciaActual =>
+      FrecuenciaPago.fromId(_frecuenciaSeleccionada);
+
+  double get _cuotaPorPeriodo =>
+      _totalPagar > 0 && _diasPlazo > 0
+          ? _frecuenciaActual.calcularCuota(_totalPagar, _diasPlazo)
+          : 0;
+
+  int get _numPagos =>
+      _diasPlazo > 0
+          ? (_diasPlazo / _frecuenciaActual.diasPorPeriodo).ceil()
+          : 0;
 
   @override
   void initState() {
@@ -55,16 +73,13 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
   }
 
   Future<void> _cargarDatos() async {
-    final prefs = await SharedPreferences.getInstance();
-
-    // Lee directamente desde SharedPreferences — AuthService.login los guarda correctamente
     final rol = await AuthProvider.getRol();
     _userId = await AuthProvider.getUserId();
 
     debugPrint('═══════════════════════════════════');
     debugPrint('NuevoPrestamoScreen._cargarDatos()');
-    debugPrint('userrol en prefs: "$rol"');
-    debugPrint('userid en prefs: "$_userId"');
+    debugPrint('rol: "$rol"');
+    debugPrint('userId: "$_userId"');
     debugPrint('═══════════════════════════════════');
 
     final esAdmin = rol == 'admin';
@@ -117,7 +132,7 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
 
   Future<String?> _getToken() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString('jwttoken');
+    return prefs.getString(StorageKeys.token);
   }
 
   void _snack(String mensaje, Color color) {
@@ -211,25 +226,32 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
           '¿Confirmar préstamo?',
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _confirmFila('Cliente', nombre),
-            _confirmFila('Monto prestado', '\$${_monto.toStringAsFixed(0)}'),
-            _confirmFila('Total a pagar', '\$${_totalPagar.toStringAsFixed(0)}'),
-            _confirmFila('Plazo', '$_diasPlazo días'),
-            _confirmFila('Cuota diaria', '\$${_cuotaDiaria.toStringAsFixed(0)}/día'),
-            if (_esAdmin && _cobradorSeleccionadoNombre != null)
-              _confirmFila('Cobrador', _cobradorSeleccionadoNombre!),
-            if (!_esAdmin)
-              const Text(
-                'Este préstamo se asignará automáticamente a tu usuario.',
-                style: TextStyle(color: Colors.grey, fontSize: 12),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _confirmFila('Cliente', nombre),
+              _confirmFila('Monto prestado', '\$${_monto.toStringAsFixed(0)}'),
+              _confirmFila('Total a pagar', '\$${_totalPagar.toStringAsFixed(0)}'),
+              _confirmFila('Plazo', '$_diasPlazo días'),
+              _confirmFila('Frecuencia', _frecuenciaActual.label),
+              _confirmFila(
+                'Cuota por ${_frecuenciaActual.label.toLowerCase()}',
+                '\$${_cuotaPorPeriodo.toStringAsFixed(0)}',
               ),
-            if (_rutaSeleccionadaNombre != null)
-              _confirmFila('Ruta', _rutaSeleccionadaNombre!),
-          ],
+              _confirmFila('Total de pagos', '$_numPagos'),
+              if (_esAdmin && _cobradorSeleccionadoNombre != null)
+                _confirmFila('Cobrador', _cobradorSeleccionadoNombre!),
+              if (!_esAdmin)
+                const Text(
+                  'Este préstamo se asignará automáticamente a tu usuario.',
+                  style: TextStyle(color: Colors.grey, fontSize: 12),
+                ),
+              if (_rutaSeleccionadaNombre != null)
+                _confirmFila('Ruta', _rutaSeleccionadaNombre!),
+            ],
+          ),
         ),
         actions: [
           TextButton(
@@ -267,6 +289,7 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
         'diasplazo': _diasPlazo,
         'cobradorid': cobradorIdFinal,
         'rutaid': _rutaSeleccionadaId,
+        'frecuencia': _frecuenciaSeleccionada,
         'modointeres': 'manual',
       };
 
@@ -283,7 +306,10 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
       setState(() => _isLoading = false);
 
       if (response.statusCode == 201) {
-        _snack('✅ Préstamo creado exitosamente', Colors.green);
+        _snack(
+          '✅ Préstamo creado (${_frecuenciaActual.label}: \$${_cuotaPorPeriodo.toStringAsFixed(0)})',
+          Colors.green,
+        );
         Navigator.pop(context, true);
       } else {
         String error = 'Error desconocido';
@@ -336,6 +362,7 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // ── DATOS DEL CLIENTE ──
             const Text('Datos del Cliente',
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             const SizedBox(height: 12),
@@ -374,7 +401,7 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
             ),
             const SizedBox(height: 20),
 
-            // ── SELECTOR DE COBRADOR (solo admin) ──────────────────────
+            // ── SELECTOR DE COBRADOR (solo admin) ──
             if (_esAdmin) ...[
               const Text('Cobrador Responsable',
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
@@ -413,7 +440,7 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
               const SizedBox(height: 20),
             ],
 
-            // ── AVISO COBRADOR (solo si NO es admin) ───────────────────
+            // ── AVISO COBRADOR (solo si NO es admin) ──
             if (!_esAdmin) ...[
               Container(
                 padding: const EdgeInsets.all(12),
@@ -438,7 +465,7 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
               const SizedBox(height: 20),
             ],
 
-            // ── RUTA ───────────────────────────────────────────────────
+            // ── RUTA ──
             const Text('Ruta',
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             const SizedBox(height: 12),
@@ -483,7 +510,7 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
                   ),
             const SizedBox(height: 20),
 
-            // ── MONTO ──────────────────────────────────────────────────
+            // ── MONTO ──
             const Text('Monto a Prestar',
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             const SizedBox(height: 12),
@@ -501,7 +528,7 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
             ),
             const SizedBox(height: 20),
 
-            // ── TOTAL A PAGAR ──────────────────────────────────────────
+            // ── TOTAL A PAGAR ──
             const Text('Total a Pagar',
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             const SizedBox(height: 12),
@@ -519,7 +546,7 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
             ),
             const SizedBox(height: 20),
 
-            // ── PLAZO ──────────────────────────────────────────────────
+            // ── PLAZO ──
             const Text('Plazo',
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             const SizedBox(height: 12),
@@ -536,7 +563,18 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
             ),
             const SizedBox(height: 20),
 
-            // ── RESUMEN ────────────────────────────────────────────────
+            // ── FRECUENCIA DE PAGO (NUEVO) ──
+            if (_diasPlazo > 0 && _totalPagar > 0)
+              FrecuenciaSelector(
+                frecuenciaSeleccionada: _frecuenciaSeleccionada,
+                onChanged: (nueva) =>
+                    setState(() => _frecuenciaSeleccionada = nueva),
+                montoTotal: _totalPagar,
+                diasPlazo: _diasPlazo,
+              ),
+            if (_diasPlazo > 0 && _totalPagar > 0) const SizedBox(height: 20),
+
+            // ── RESUMEN ──
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -555,12 +593,18 @@ class _NuevoPrestamoScreenState extends State<NuevoPrestamoScreen> {
                   _resumenFila('Total a pagar:',
                       '\$${_totalPagar.toStringAsFixed(0)}',
                       bold: true),
-                  _resumenFila(
-                      'Cuota diaria:',
-                      '\$${_cuotaDiaria.toStringAsFixed(0)}/día',
-                      bold: true,
-                      color: Colors.green),
                   _resumenFila('Plazo:', '$_diasPlazo días'),
+                  _resumenFila('Frecuencia:',
+                      '${_frecuenciaActual.icono} ${_frecuenciaActual.label}'),
+                  if (_cuotaPorPeriodo > 0)
+                    _resumenFila(
+                      'Cuota por ${_frecuenciaActual.label.toLowerCase()}:',
+                      '\$${_cuotaPorPeriodo.toStringAsFixed(0)}',
+                      bold: true,
+                      color: Colors.green,
+                    ),
+                  if (_numPagos > 0)
+                    _resumenFila('Total de pagos:', '$_numPagos'),
                   if (_monto > _montoMax ||
                       _totalPagar > _totalPagarMax ||
                       _diasPlazo > _diasPlazoMax ||
